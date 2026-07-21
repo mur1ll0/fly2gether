@@ -1,0 +1,17 @@
+{
+  "name": "fly2gether",
+  "version": "1.0.0",
+  "description": "Sistema Inteligente de Busca de Voos Normais e Combinados (Fly Together) com Finais de Semana, Feriados e Férias Conjuntas",
+  "main": "server/src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server",
+    "build": "npm run build --prefix client",
+    "start": "node server/src/server.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
