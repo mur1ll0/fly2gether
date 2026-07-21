@@ -1,21 +1,12 @@
-import { AIRPORTS } from '../data/airports.js';
+import { searchGlobalAirports } from '../services/airportService.js';
 
-export function searchAirports(req, res) {
-  const query = (req.query.q || '').trim().toLowerCase();
-
-  if (!query) {
-    // Return top popular airports if no query provided
-    return res.json(AIRPORTS.slice(0, 15));
+export async function searchAirports(req, res) {
+  try {
+    const query = req.query.q || '';
+    const results = await searchGlobalAirports(query);
+    res.json(results);
+  } catch (error) {
+    console.error('Erro na busca de aeroportos:', error.message);
+    res.status(500).json({ error: 'Erro ao buscar aeroportos.' });
   }
-
-  const results = AIRPORTS.filter(airport => {
-    return (
-      airport.iata.toLowerCase().includes(query) ||
-      airport.city.toLowerCase().includes(query) ||
-      airport.name.toLowerCase().includes(query) ||
-      airport.country.toLowerCase().includes(query)
-    );
-  }).slice(0, 20);
-
-  res.json(results);
 }

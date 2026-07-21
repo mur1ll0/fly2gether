@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Bell, X, Check, Mail, DollarSign } from 'lucide-react';
+import Swal from 'sweetalert2';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -31,6 +32,17 @@ export default function CreateAlertModal({ isOpen, onClose, alertTarget, onAlert
       };
 
       await API.post('/alerts', payload);
+      
+      Swal.fire({
+        title: 'Alerta Criado!',
+        text: 'Você receberá e-mails automáticos quando o preço baixar.',
+        icon: 'success',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#22c55e',
+        timer: 3000
+      });
+
       setSuccessMessage('✅ Alerta ativado! Você receberá e-mails quando o valor baixar.');
       if (onAlertCreated) onAlertCreated();
       setTimeout(() => {
@@ -38,7 +50,14 @@ export default function CreateAlertModal({ isOpen, onClose, alertTarget, onAlert
         onClose();
       }, 2000);
     } catch (err) {
-      alert(err.response?.data?.error || 'Erro ao criar alerta de preço.');
+      Swal.fire({
+        title: 'Erro',
+        text: err.response?.data?.error || 'Não foi possível criar o alerta.',
+        icon: 'error',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#ef4444'
+      });
     } finally {
       setLoading(false);
     }

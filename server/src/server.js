@@ -2,11 +2,16 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+
+// Carregar variáveis do .env da raiz e da pasta server
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
+
 import { connectDB } from './config/db.js';
 import apiRoutes from './routes/apiRoutes.js';
 import { initCronJobs } from './services/cronService.js';
-
-dotenv.config();
 
 const app = express();
 

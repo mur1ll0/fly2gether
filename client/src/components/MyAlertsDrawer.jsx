@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Trash2, Bell, RefreshCw, Mail, CheckCircle, ExternalLink } from 'lucide-react';
+import Swal from 'sweetalert2';
 import API from '../services/api';
 
 export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh }) {
@@ -28,10 +29,28 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
   const handleDelete = async (id) => {
     try {
       await API.delete(`/alerts/${id}`);
+      
+      Swal.fire({
+        title: 'Alerta Removido',
+        text: 'O monitoramento de preço foi excluído com sucesso.',
+        icon: 'success',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#0066ff',
+        timer: 2000
+      });
+
       fetchAlerts();
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Erro ao excluir alerta.');
+      Swal.fire({
+        title: 'Erro',
+        text: 'Não foi possível excluir o alerta de preço.',
+        icon: 'error',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#ef4444'
+      });
     }
   };
 
@@ -39,10 +58,26 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
     setScanning(true);
     try {
       await API.post('/alerts/check-now');
-      alert('⚡ Varredura manual executada com sucesso! Verifique sua caixa de e-mail.');
+      
+      Swal.fire({
+        title: 'Varredura Concluída!',
+        text: 'Os e-mails de alerta correspondentes foram disparados via Resend.',
+        icon: 'success',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#22c55e'
+      });
+      
       fetchAlerts();
     } catch (err) {
-      alert('Erro ao disparar varredura.');
+      Swal.fire({
+        title: 'Erro na Varredura',
+        text: 'Ocorreu uma falha ao processar a varredura manual de alertas.',
+        icon: 'error',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#ef4444'
+      });
     } finally {
       setScanning(false);
     }

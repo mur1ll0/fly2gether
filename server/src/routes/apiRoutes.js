@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { searchAirports } from '../controllers/airportController.js';
 import { googleLogin, getCurrentUser } from '../controllers/authController.js';
-import { handleSearchFlights } from '../controllers/flightController.js';
+import { handleSearchFlights, handleSerpApiUsage, handleGetReturnFlights, handleGetBookingUrl } from '../controllers/flightController.js';
 import { createAlert, getUserAlerts, deleteAlert, checkAlertsNow } from '../controllers/alertController.js';
 import { authenticateToken } from '../middleware/authMiddleware.js';
 
@@ -23,6 +23,9 @@ router.get('/auth/me', authenticateToken, getCurrentUser);
 
 // Busca de Voos Normais e Voos Combinados (Fly Together)
 router.get('/flights/search', handleSearchFlights);
+router.get('/flights/return-options', handleGetReturnFlights);
+router.get('/flights/booking-url', handleGetBookingUrl);
+router.get('/serpapi-usage', handleSerpApiUsage);
 
 // Alertas de Preço por E-mail
 router.post('/alerts', createAlert);

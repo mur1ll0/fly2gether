@@ -41,9 +41,11 @@ export default function AirportAutocomplete({ label, placeholder, value, onChang
     setLoading(true);
     API.get(`/airports?q=${encodeURIComponent(text)}`)
       .then(res => {
-        setSuggestions(res.data || []);
+        setSuggestions(Array.isArray(res.data) ? res.data : []);
       })
-      .catch(() => {})
+      .catch(() => {
+        setSuggestions([]);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -58,6 +60,8 @@ export default function AirportAutocomplete({ label, placeholder, value, onChang
     setSuggestions([]);
     onChange(null);
   };
+
+  const safeSuggestions = Array.isArray(suggestions) ? suggestions : [];
 
   return (
     <div className="relative w-full" ref={wrapperRef}>
@@ -76,7 +80,7 @@ export default function AirportAutocomplete({ label, placeholder, value, onChang
           onChange={handleInputChange}
           onFocus={() => {
             setIsOpen(true);
-            if (!suggestions.length) handleInputChange({ target: { value: query } });
+            if (!safeSuggestions.length) handleInputChange({ target: { value: query } });
           }}
           placeholder={placeholder || 'Digite a cidade ou código IATA (ex: GRU, Rio, Salvador)...'}
           className="w-full pl-11 pr-10 py-3 bg-slate-900/90 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all shadow-inner text-sm font-medium"
@@ -96,17 +100,17 @@ export default function AirportAutocomplete({ label, placeholder, value, onChang
         <div className="absolute z-50 w-full mt-2 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl max-h-64 overflow-y-auto backdrop-blur-md divide-y divide-slate-800">
           {loading ? (
             <div className="p-4 text-center text-xs text-slate-400 animate-pulse">Buscando aeroportos...</div>
-          ) : suggestions.length > 0 ? (
-            suggestions.map((item) => (
+          ) : safeSuggestions.length > 0 ? (
+            safeSuggestions.map((item) => (
               <button
-                key={item.iata}
+                key={item.iata || item.code || Math.random()}
                 type="button"
                 onClick={() => handleSelect(item)}
                 className="w-full px-4 py-3 text-left hover:bg-slate-800/90 transition-colors flex items-center justify-between group"
               >
                 <div className="flex items-center space-x-3 overflow-hidden">
                   <span className="px-2.5 py-1 text-xs font-bold font-mono bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded-md group-hover:bg-brand-500 group-hover:text-white transition-colors">
-                    {item.iata}
+                    {item.iata || item.code}
                   </span>
                   <div className="truncate">
                     <p className="text-sm font-semibold text-slate-200 group-hover:text-white truncate">
