@@ -663,10 +663,17 @@ export async function searchSingleFlights({
 
   const resolvedBatches = await Promise.all(searchPromises);
 
-  // Se houver algum em processo de raspagem na fila, retorna sinalização
+  // Se houver algum em processo de raspagem na fila, retorna sinalização com contagem de progresso
   const scrapingBatch = resolvedBatches.find(batch => batch && batch.status === 'scraping');
   if (scrapingBatch) {
-    return scrapingBatch;
+    const completedCount = resolvedBatches.filter(batch => Array.isArray(batch)).length;
+    const totalCount = resolvedBatches.length;
+    return {
+      status: 'scraping',
+      message: `O robô está coletando as passagens aéreas... (${completedCount} de ${totalCount} datas concluídas)`,
+      completedCount,
+      totalCount
+    };
   }
 
   resolvedBatches.forEach(batch => {
@@ -725,8 +732,26 @@ export async function searchCombinedFlights({
     })
   ]);
 
-  if (person1Flights && person1Flights.status === 'scraping') return person1Flights;
-  if (person2Flights && person2Flights.status === 'scraping') return person2Flights;
+  const p1IsScraping = person1Flights && person1Flights.status === 'scraping';
+  const p2IsScraping = person2Flights && person2Flights.status === 'scraping';
+
+  if (p1IsScraping || p2IsScraping) {
+    const p1Completed = p1IsScraping ? (person1Flights.completedCount || 0) : (Array.isArray(person1Flights) ? person1Flights.length : 8);
+    const p1Total = p1IsScraping ? (person1Flights.totalCount || 8) : 8;
+
+    const p2Completed = p2IsScraping ? (person2Flights.completedCount || 0) : (Array.isArray(person2Flights) ? person2Flights.length : 8);
+    const p2Total = p2IsScraping ? (person2Flights.totalCount || 8) : 8;
+
+    const totalCompleted = p1Completed + p2Completed;
+    const totalCount = p1Total + p2Total;
+
+    return {
+      status: 'scraping',
+      message: `O robô está coletando voos... (${totalCompleted} de ${totalCount} trechos concluídos)`,
+      completedCount: totalCompleted,
+      totalCount
+    };
+  }
 
   const combinedResults = [];
 

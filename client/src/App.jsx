@@ -126,7 +126,7 @@ export default function App() {
       } catch (err) {
         console.error('❌ [Polling] Erro no polling de busca:', err);
       }
-    }, 10000); // 10s
+    }, 5000); // 5s
   };
 
   const handleSearch = async (e) => {

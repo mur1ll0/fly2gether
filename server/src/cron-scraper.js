@@ -206,10 +206,12 @@ async function runScraperJob() {
   let skippedCount = 0;
   let failureCount = 0;
 
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
-    log(`[Progresso ${i+1}/${tasks.length}] Processando: ${task.origin} ➔ ${task.destination} em ${task.departureDate}`);
+  const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY) || 3;
+  log(`Iniciando processamento das tarefas com limite de concorrência = ${concurrencyLimit}`);
 
+  let index = 0;
+  const workerFn = async (task, taskIdx) => {
+    log(`[Progresso ${taskIdx+1}/${tasks.length}] Iniciando processamento: ${task.origin} ➔ ${task.destination} em ${task.departureDate}`);
     try {
       // 1. Checa se o cache no banco de dados já possui registro recente (< 24h) e concluído
       const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -222,9 +224,9 @@ async function runScraperJob() {
       });
 
       if (existingCache) {
-        log(`-> Cache fresco encontrado no MongoDB (coletado em ${existingCache.scrapedAt.toISOString()}). Pulando raspagem.`);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Cache fresco encontrado no MongoDB. Pulando raspagem.`);
         skippedCount++;
-        continue;
+        return;
       }
 
       // 2. Executa a raspagem de voos
@@ -251,10 +253,10 @@ async function runScraperJob() {
           },
           { upsert: true, new: true }
         );
-        log(`-> Gravado/Atualizado com sucesso no MongoDB com ${flightsList.length} ofertas.`);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Gravado/Atualizado no MongoDB com ${flightsList.length} ofertas.`);
         successCount++;
       } else {
-        log(`-> ⚠️ Nenhum voo retornado pela raspagem. Marcando como completed vazio.`);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> ⚠️ Nenhum voo retornado. Marcando como concluído vazio.`);
         await FlightCache.findOneAndUpdate(
           {
             origin: task.origin,
@@ -273,12 +275,11 @@ async function runScraperJob() {
         failureCount++;
       }
 
-      // Atraso preventivo de 4 segundos entre execuções para evitar CAPTCHAs
-      log('Aguardando 4 segundos de atraso de cortesia...');
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      // Atraso preventivo de 3 segundos entre execuções do mesmo worker para evitar CAPTCHAs
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
     } catch (taskErr) {
-      log(`-> ❌ Falha ao processar tarefa: ${taskErr.message}`);
+      log(`[Progresso ${taskIdx+1}/${tasks.length}] -> ❌ Falha: ${taskErr.message}`);
       try {
         await FlightCache.findOneAndUpdate(
           {
@@ -295,13 +296,23 @@ async function runScraperJob() {
           },
           { upsert: true }
         );
-        log(`-> Marcado como completed vazio após falha.`);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Marcado como concluído vazio após falha.`);
       } catch (dbErr) {
         log(`-> Erro ao salvar falha no MongoDB: ${dbErr.message}`);
       }
       failureCount++;
     }
-  }
+  };
+
+  const workers = Array(concurrencyLimit).fill(null).map(async () => {
+    while (index < tasks.length) {
+      const taskIdx = index++;
+      const task = tasks[taskIdx];
+      await workerFn(task, taskIdx);
+    }
+  });
+
+  await Promise.all(workers);
 
   log(`Job concluído. Sucessos: ${successCount}, Pulados: ${skippedCount}, Falhas: ${failureCount}`);
 }
