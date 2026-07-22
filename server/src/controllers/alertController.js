@@ -118,7 +118,7 @@ export async function checkAlertsNow() {
           vacationEnd: alert.vacationEnd
         });
 
-        if (results.length > 0) {
+        if (Array.isArray(results) && results.length > 0) {
           const best = results[0];
           if (!alert.maxBudgetCombined || best.combinedPrice <= alert.maxBudgetCombined || best.hasPromo) {
             await sendPriceAlertEmail({
@@ -139,7 +139,7 @@ export async function checkAlertsNow() {
           vacationEnd: alert.vacationEnd
         });
 
-        if (results.length > 0) {
+        if (Array.isArray(results) && results.length > 0) {
           const best = results[0];
           if (!alert.maxBudgetCombined || best.totalPrice <= alert.maxBudgetCombined || best.isMegaPromo) {
             await sendPriceAlertEmail({

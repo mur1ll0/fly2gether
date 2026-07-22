@@ -4,7 +4,7 @@ import Swal from 'sweetalert2';
 import Navbar from './components/Navbar';
 import AirportAutocomplete from './components/AirportAutocomplete';
 import SmartExtensionsToggle from './components/SmartExtensionsToggle';
-import FilterSortBar from './components/FilterSortBar';
+import FilterSortBar, { TOLERANCE_STEPS } from './components/FilterSortBar';
 import FlightCard from './components/FlightCard';
 import CombinedFlightCard from './components/CombinedFlightCard';
 import CreateAlertModal from './components/CreateAlertModal';
@@ -32,10 +32,11 @@ export default function App() {
   const [durationDays, setDurationDays] = useState(4);
 
   // Sorting & Filtering Controls
-  const [sortBy, setSortBy] = useState('tempo_juntos'); // 'tempo_juntos', 'price', 'duration', 'departureTime', 'sincronia'
+  const [sortBy, setSortBy] = useState('sincronia_total'); // 'sincronia_total', 'tempo_juntos', 'price', 'duration', 'departureTime', 'sincronia'
   const [selectedAirlines, setSelectedAirlines] = useState(['LA', 'G3', 'AD', 'TP', 'CM']);
   const [stopsFilter, setStopsFilter] = useState('all'); // 'all', 'direct', 'stops'
   const [hideTransfers, setHideTransfers] = useState(false);
+  const [toleranceIndex, setToleranceIndex] = useState(3); // Default to 3 (1h)
 
   // Results, Loading, SerpAPI Quota & Cancel Trigger
   const [loading, setLoading] = useState(false);
@@ -43,15 +44,19 @@ export default function App() {
   const [activeAlertTarget, setActiveAlertTarget] = useState(null);
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleSearchModeChange = (mode) => {
     setSearchMode(mode);
-    setSortBy(mode === 'flytogether' ? 'tempo_juntos' : 'price');
+    setSortBy(mode === 'flytogether' ? 'sincronia_total' : 'price');
   };
   const [alertsCount, setAlertsCount] = useState(0);
   const [serpApiUsage, setSerpApiUsage] = useState(null);
+  const [useLiveApi, setUseLiveApi] = useState(false);
+  const [scrapingMessage, setScrapingMessage] = useState('');
 
   const abortControllerRef = useRef(null);
+  const pollingIntervalRef = useRef(null);
 
   // Restaurar dados da última pesquisa do usuário
   useEffect(() => {
@@ -93,6 +98,35 @@ export default function App() {
     API.get('/serpapi-usage')
       .then(res => setSerpApiUsage(res.data))
       .catch(() => {});
+  };
+
+  const startPollingSearch = (searchParams) => {
+    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+    
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        console.log('🔄 [Polling] Verificando se a coleta do robô terminou...');
+        const res = await API.get('/flights/search', {
+          params: searchParams
+        });
+        
+        if (res.data?.status !== 'scraping') {
+          console.log('✅ [Polling] Coleta concluída com sucesso!');
+          setResults(Array.isArray(res.data?.results) ? res.data.results : []);
+          setScrapingMessage('');
+          setLoading(false);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          fetchSerpApiUsage();
+        } else {
+          setScrapingMessage(res.data.message || 'Nosso robô está minerando tarifas...');
+        }
+      } catch (err) {
+        console.error('❌ [Polling] Erro no polling de busca:', err);
+      }
+    }, 10000); // 10s
   };
 
   const handleSearch = async (e) => {
@@ -151,12 +185,18 @@ export default function App() {
     localStorage.setItem('fly2gether_last_search', JSON.stringify(searchCriteria));
 
     setLoading(true);
+    setScrapingMessage('');
 
-    // Cancelar qualquer requisição ativa anterior
+    // Cancelar qualquer requisição ou polling ativos anteriores
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
+
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
 
     try {
       const params = {
@@ -171,24 +211,32 @@ export default function App() {
         isVacation,
         vacationStart,
         vacationEnd,
-        durationDays
+        durationDays,
+        useLiveApi
       };
 
       const res = await API.get('/flights/search', {
         params,
         signal: abortControllerRef.current.signal
       });
-      setResults(Array.isArray(res.data?.results) ? res.data.results : []);
-      fetchSerpApiUsage(); // Atualiza cota de buscas após realizar a pesquisa
+
+      if (res.data?.status === 'scraping') {
+        setScrapingMessage(res.data.message || 'Nosso robô iniciou a busca no Google Flights...');
+        startPollingSearch(params);
+      } else {
+        setResults(Array.isArray(res.data?.results) ? res.data.results : []);
+        setScrapingMessage('');
+        setLoading(false);
+        fetchSerpApiUsage(); // Atualiza cota de buscas após realizar a pesquisa
+      }
     } catch (err) {
       if (err.name === 'CanceledError' || err.message?.includes('canceled')) {
         console.log('Pesquisa cancelada pelo usuário.');
       } else {
         console.error('Erro na busca:', err);
         setResults([]);
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -197,6 +245,11 @@ export default function App() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    setScrapingMessage('');
     setLoading(false);
     Swal.fire({
       title: 'Busca Cancelada',
@@ -205,7 +258,7 @@ export default function App() {
       toast: true,
       position: 'top-end',
       showConfirmButton: false,
-      timer: 2000,
+      timer: 3000,
       background: '#0f172a',
       color: '#f8fafc'
     });
@@ -215,6 +268,12 @@ export default function App() {
     setActiveAlertTarget(flightOrCombined);
     setIsAlertModalOpen(true);
   };
+
+  // Checar se há resultados provenientes de cache expirado (SWR em revalidação)
+  const hasStaleResults = useMemo(() => {
+    const safeResults = Array.isArray(results) ? results : [];
+    return safeResults.some(f => f.isStaleCache || f.person1?.isStaleCache || f.person2?.isStaleCache);
+  }, [results]);
 
   // Filtragem e Ordenação Dinâmica de Resultados
   const filteredAndSortedResults = useMemo(() => {
@@ -226,7 +285,7 @@ export default function App() {
         if (searchMode === 'flytogether') {
           const code1 = item.person1?.airline?.code;
           const code2 = item.person2?.airline?.code;
-          if (selectedAirlines.length > 0 && !selectedAirlines.includes(code1) && !selectedAirlines.includes(code2)) {
+          if (selectedAirlines.length > 0 && (!selectedAirlines.includes(code1) || !selectedAirlines.includes(code2))) {
             return false;
           }
         } else {
@@ -236,34 +295,99 @@ export default function App() {
           }
         }
 
-        // Filtro por Escalas / Conexões
+        // Filtro por Escalas / Conexões (considerando ida e volta)
         if (stopsFilter === 'direct') {
           if (searchMode === 'flytogether') {
-            if (item.person1?.stopsCount > 0 || item.person2?.stopsCount > 0) return false;
+            if (
+              item.person1?.stopsCount > 0 || 
+              item.person2?.stopsCount > 0 ||
+              (item.person1?.returnStopsCount || 0) > 0 ||
+              (item.person2?.returnStopsCount || 0) > 0
+            ) return false;
           } else {
-            if (item.stopsCount > 0) return false;
+            if (item.stopsCount > 0 || (item.returnStopsCount || 0) > 0) return false;
           }
         } else if (stopsFilter === 'stops') {
           if (searchMode === 'flytogether') {
-            if (item.person1?.stopsCount === 0 && item.person2?.stopsCount === 0) return false;
+            if (
+              item.person1?.stopsCount === 0 && 
+              item.person2?.stopsCount === 0 &&
+              (item.person1?.returnStopsCount || 0) === 0 &&
+              (item.person2?.returnStopsCount || 0) === 0
+            ) return false;
           } else {
-            if (item.stopsCount === 0) return false;
+            if (item.stopsCount === 0 && (item.returnStopsCount || 0) === 0) return false;
           }
         }
 
-        // Filtro para ocultar conexões com troca de aeroporto (traslado)
+        // Filtro para ocultar conexões com troca de aeroporto (traslado na ida e volta)
         if (hideTransfers) {
           if (searchMode === 'flytogether') {
-            if (item.person1?.hasAirportTransfer || item.person2?.hasAirportTransfer) return false;
+            if (
+              item.person1?.hasAirportTransfer || 
+              item.person1?.returnHasAirportTransfer ||
+              item.person2?.hasAirportTransfer || 
+              item.person2?.returnHasAirportTransfer
+            ) return false;
           } else {
-            if (item.hasAirportTransfer || item.returnHasAirportTransfer) return false;
+            if (
+              item.hasAirportTransfer || 
+              item.returnHasAirportTransfer
+            ) return false;
+          }
+        }
+
+        // Filtro de Tolerância de Horários no modo Fly Together
+        if (searchMode === 'flytogether') {
+          const limit = TOLERANCE_STEPS[toleranceIndex]?.value;
+          if (limit !== undefined && limit !== Infinity) {
+            let returnDepartureDelta = 0;
+            let hasReturn = false;
+            if (item.person1?.returnDepartureTime && item.person2?.returnDepartureTime) {
+              const [h1, m1] = item.person1.returnDepartureTime.split(':').map(Number);
+              const [h2, m2] = item.person2.returnDepartureTime.split(':').map(Number);
+              returnDepartureDelta = Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
+              hasReturn = true;
+            }
+            // Média de discrepância entre os trechos ativos
+            const averageDelta = hasReturn 
+              ? (item.arrivalDeltaMinutes + returnDepartureDelta) / 2 
+              : item.arrivalDeltaMinutes;
+
+            if (averageDelta > limit) return false;
           }
         }
 
         return true;
       })
       .sort((a, b) => {
-        if (sortBy === 'tempo_juntos' && searchMode === 'flytogether') {
+        if (sortBy === 'sincronia_total' && searchMode === 'flytogether') {
+          const getReturnDelta = (item) => {
+            if (item.person1?.returnDepartureTime && item.person2?.returnDepartureTime) {
+              const [h1, m1] = item.person1.returnDepartureTime.split(':').map(Number);
+              const [h2, m2] = item.person2.returnDepartureTime.split(':').map(Number);
+              return Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
+            }
+            return 0;
+          };
+          const totalDeltaA = a.arrivalDeltaMinutes + getReturnDelta(a);
+          const totalDeltaB = b.arrivalDeltaMinutes + getReturnDelta(b);
+
+          const limit = TOLERANCE_STEPS[toleranceIndex]?.value;
+          if (limit !== undefined && limit !== Infinity) {
+            // Se a tolerância está ativada, traz os mais baratos primeiro dentro dessa margem
+            if (a.combinedPrice !== b.combinedPrice) {
+              return a.combinedPrice - b.combinedPrice;
+            }
+            return totalDeltaA - totalDeltaB;
+          } else {
+            // Se for "Qualquer", ordena primeiramente pela melhor sincronia total
+            if (totalDeltaA !== totalDeltaB) {
+              return totalDeltaA - totalDeltaB;
+            }
+            return a.combinedPrice - b.combinedPrice;
+          }
+        } else if (sortBy === 'tempo_juntos' && searchMode === 'flytogether') {
           if (b.sharedStayMinutes !== a.sharedStayMinutes) {
             return b.sharedStayMinutes - a.sharedStayMinutes;
           }
@@ -273,7 +397,15 @@ export default function App() {
           const priceB = searchMode === 'flytogether' ? b.combinedPrice : b.totalPrice;
           return priceA - priceB;
         } else if (sortBy === 'sincronia' && searchMode === 'flytogether') {
-          return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
+          const limit = TOLERANCE_STEPS[toleranceIndex]?.value;
+          if (limit !== undefined && limit !== Infinity) {
+            if (a.combinedPrice !== b.combinedPrice) {
+              return a.combinedPrice - b.combinedPrice;
+            }
+            return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
+          } else {
+            return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
+          }
         } else if (sortBy === 'departureTime') {
           const timeA = searchMode === 'flytogether' ? a.person1?.departureTime : a.departureTime;
           const timeB = searchMode === 'flytogether' ? b.person1?.departureTime : b.departureTime;
@@ -285,7 +417,24 @@ export default function App() {
         }
         return 0;
       });
-  }, [results, sortBy, selectedAirlines, stopsFilter, hideTransfers, searchMode]);
+  }, [results, sortBy, selectedAirlines, stopsFilter, hideTransfers, searchMode, toleranceIndex]);
+
+  // Resetar página atual de paginação ao alterar qualquer critério de filtragem ou ordenação
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [results, selectedAirlines, stopsFilter, hideTransfers, sortBy, toleranceIndex]);
+
+  const PAGE_SIZE = 100;
+
+  // Obter resultados fatiados para renderizar apenas a página atual
+  const paginatedResults = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return filteredAndSortedResults.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredAndSortedResults, currentPage]);
+
+  const totalPages = useMemo(() => {
+    return Math.ceil(filteredAndSortedResults.length / PAGE_SIZE);
+  }, [filteredAndSortedResults]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[#070b14] text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
@@ -304,7 +453,10 @@ export default function App() {
           </div>
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
             Encontre a data perfeita para{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-purple-400 to-pink-400">
+            <span 
+              className="bg-clip-text bg-gradient-to-r from-brand-400 via-purple-400 to-pink-400 font-extrabold"
+              style={{ color: 'transparent', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
+            >
               viajar junto
             </span>
           </h1>
@@ -432,6 +584,29 @@ export default function App() {
               durationDays={durationDays}
               setDurationDays={setDurationDays}
             />
+            {/* Paid API vs Free Scraper Toggle */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-950/40 rounded-2xl border border-slate-800/60 mb-6 space-y-2 sm:space-y-0">
+              <div className="space-y-0.5">
+                <span className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Pesquisar ao Vivo (SerpAPI Paga)
+                </span>
+                <p className="text-xs text-slate-400 max-w-lg">
+                  O modo padrão (robô) usa cache de 24h e é grátis. O modo ao vivo pesquisa tarifas em tempo real consumindo créditos da API.
+                </p>
+              </div>
+              
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useLiveApi}
+                  onChange={(e) => setUseLiveApi(e.target.checked)}
+                  disabled={loading}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-600"></div>
+              </label>
+            </div>
 
             {/* Submit & Cancel Buttons */}
             <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -473,6 +648,25 @@ export default function App() {
 
         {/* Results Section */}
         <div className="space-y-6">
+          {/* Planejamento Disclaimer Banner */}
+          {results.length > 0 && (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2.5 shadow-sm">
+              <span className="text-base">⚠️</span>
+              <p className="leading-relaxed">
+                <strong>Aviso de Planejamento:</strong> Os horários, conexões e preços exibidos são para fins de histórico e planejamento conjunto. As tarifas aéreas reais flutuam constantemente e podem sofrer alterações pelas companhias no momento da compra.
+              </p>
+            </div>
+          )}
+
+          {/* Stale Cache background revalidation alert */}
+          {results.length > 0 && hasStaleResults && (
+            <div className="p-4 rounded-2xl bg-brand-500/10 border border-brand-500/25 text-brand-300 text-xs flex items-center gap-2.5 shadow-sm animate-pulse">
+              <RefreshCw className="w-4 h-4 text-brand-400 animate-spin" />
+              <p>
+                <strong>Dados Históricos Ativos:</strong> Algumas passagens exibidas acima são do cache de ontem. Nosso robô já foi acionado e está atualizando os preços em segundo plano.
+              </p>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-2xl font-black text-slate-100 flex flex-col sm:flex-row sm:items-center gap-2">
@@ -512,6 +706,8 @@ export default function App() {
               hideTransfers={hideTransfers}
               setHideTransfers={setHideTransfers}
               searchMode={searchMode}
+              toleranceIndex={toleranceIndex}
+              setToleranceIndex={setToleranceIndex}
             />
           )}
 
@@ -520,29 +716,88 @@ export default function App() {
             <div className="glass-panel p-12 text-center rounded-3xl border border-slate-800 space-y-4 bg-slate-900/40">
               <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
               <h3 className="text-lg font-bold text-slate-200">
-                Consultando as melhores opções no Google Flights...
+                {scrapingMessage || 'Consultando as melhores opções no Google Flights...'}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Consultando companhias aéreas e tarifas promocionais diretamente na API.
+                {scrapingMessage 
+                  ? 'Nosso robô está vasculhando a web para colher tarifas, aeronaves e conexões detalhadas (isso pode levar cerca de 1 minuto na primeira busca).' 
+                  : 'Consultando companhias aéreas e tarifas promocionais diretamente na API.'}
               </p>
             </div>
           ) : filteredAndSortedResults.length > 0 ? (
-            <div className="space-y-4">
-              {filteredAndSortedResults.map((item) => (
-                searchMode === 'flytogether' ? (
-                  <CombinedFlightCard
-                    key={item.id}
-                    combined={item}
-                    onCreateAlert={handleOpenCreateAlert}
-                  />
-                ) : (
-                  <FlightCard
-                    key={item.id}
-                    flight={item}
-                    onCreateAlert={handleOpenCreateAlert}
-                  />
-                )
-              ))}
+            <div className="space-y-6">
+              <div className="space-y-4">
+                {paginatedResults.map((item) => (
+                  searchMode === 'flytogether' ? (
+                    <CombinedFlightCard
+                      key={item.id}
+                      combined={item}
+                      onCreateAlert={handleOpenCreateAlert}
+                    />
+                  ) : (
+                    <FlightCard
+                      key={item.id}
+                      flight={item}
+                      onCreateAlert={handleOpenCreateAlert}
+                    />
+                  )
+                ))}
+              </div>
+
+              {/* Controles de Paginação */}
+              {totalPages > 1 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-slate-900/50 rounded-2xl border border-slate-800/80 mt-6">
+                  <span className="text-xs text-slate-400">
+                    Exibindo {Math.min(filteredAndSortedResults.length, (currentPage - 1) * PAGE_SIZE + 1)}-{Math.min(filteredAndSortedResults.length, currentPage * PAGE_SIZE)} de {filteredAndSortedResults.length} opções (Página {currentPage} de {totalPages})
+                  </span>
+                  
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="px-4 py-2 text-xs font-bold text-slate-300 bg-slate-800 rounded-xl hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Anterior
+                    </button>
+                    
+                    {/* Renderizar números de páginas próximos */}
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, index) => {
+                      let pageNum = index + 1;
+                      if (totalPages > 5 && currentPage > 3) {
+                        pageNum = currentPage - 3 + index;
+                        if (pageNum + (4 - index) > totalPages) {
+                          pageNum = totalPages - 4 + index;
+                        }
+                      }
+                      
+                      return (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`w-8 h-8 rounded-xl text-xs font-bold transition ${
+                            currentPage === pageNum
+                              ? 'bg-brand-600 text-white shadow-glow'
+                              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                    
+                    <button
+                      type="button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      className="px-4 py-2 text-xs font-bold text-slate-300 bg-slate-800 rounded-xl hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="glass-panel p-12 text-center rounded-3xl border border-slate-800 space-y-3">

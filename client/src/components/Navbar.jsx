@@ -19,7 +19,7 @@ export default function Navbar({ onOpenAlertsDrawer, alertsCount = 0 }) {
             <span className="text-xl font-black tracking-tight font-sans text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-brand-400">
               Fly2Gether
             </span>
-            <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20 rounded-full">
+            <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-xs font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20 rounded-full">
               BETA
             </span>
           </div>
@@ -35,7 +35,7 @@ export default function Navbar({ onOpenAlertsDrawer, alertsCount = 0 }) {
             <Bell className="w-4 h-4 text-brand-400" />
             <span className="hidden xs:inline">Meus Alertas</span>
             {alertsCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-brand-500 text-white text-[10px] font-extrabold w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-950 shadow">
+              <span className="absolute -top-1.5 -right-1.5 bg-brand-500 text-white text-xs font-extrabold w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-950 shadow">
                 {alertsCount}
               </span>
             )}
@@ -63,7 +63,7 @@ export default function Navbar({ onOpenAlertsDrawer, alertsCount = 0 }) {
                 <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 z-50 animate-fadeIn">
                   <div className="p-3 border-b border-slate-800">
                     <p className="text-xs font-bold text-slate-100 truncate">{user.name}</p>
-                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                    <p className="text-xs text-slate-400 truncate">{user.email}</p>
                   </div>
                   <button
                     onClick={() => {

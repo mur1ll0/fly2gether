@@ -1,0 +1,52 @@
+name: Google Flights Scraper Job
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Every day at 6:00 AM UTC (3:00 AM BRT)
+  workflow_dispatch:      # Allows manual triggers from GitHub UI
+  repository_dispatch:    # Allows API triggers from Vercel backend
+    types: 
+      - scrape-all
+      - scrape-route
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'server/package-lock.json'
+
+      - name: Install Server Dependencies
+        run: |
+          npm ci --prefix server || npm install --prefix server
+
+      - name: Install Puppeteer Chromium Browser Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgbm-dev wget gnupg
+          npx --prefix server puppeteer browsers install chrome
+
+      - name: Execute Scraper Engine
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ] && [ "${{ github.event.action }}" = "scrape-route" ]; then
+            ORIGIN="${{ github.event.client_payload.origin }}"
+            DEST="${{ github.event.client_payload.destination }}"
+            DEP_DATE="${{ github.event.client_payload.departureDate }}"
+            RET_DATE="${{ github.event.client_payload.returnDate }}"
+            echo "Executing targeted scrape for: $ORIGIN ➔ $DEST (Ida: $DEP_DATE, Volta: $RET_DATE)"
+            node server/src/cron-scraper.js "$ORIGIN" "$DEST" "$DEP_DATE" "$RET_DATE"
+          else
+            echo "Executing full scrape cycle for all active alerts"
+            node server/src/cron-scraper.js
+          fi
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI || secrets.MONGODB_URI }}
+          NODE_ENV: production

@@ -16,12 +16,14 @@ export async function handleSearchFlights(req, res) {
       isVacation,
       vacationStart,
       vacationEnd,
-      durationDays
+      durationDays,
+      useLiveApi
     } = req.query;
 
     const boolWeekends = onlyWeekends === 'true' || onlyWeekends === true;
     const boolVacation = isVacation === 'true' || isVacation === true;
     const parsedDuration = parseInt(durationDays) || 4;
+    const boolLive = useLiveApi === 'true' || useLiveApi === true;
 
     if (mode === 'flytogether') {
       const orig1 = origin1 || origin;
@@ -39,8 +41,13 @@ export async function handleSearchFlights(req, res) {
         isVacation: boolVacation,
         vacationStart,
         vacationEnd,
-        durationDays: parsedDuration
+        durationDays: parsedDuration,
+        useLiveApi: boolLive
       });
+
+      if (results && results.status === 'scraping') {
+        return res.json(results);
+      }
 
       return res.json({ mode: 'flytogether', total: results.length, results });
     } else {
@@ -57,8 +64,13 @@ export async function handleSearchFlights(req, res) {
         isVacation: boolVacation,
         vacationStart,
         vacationEnd,
-        durationDays: parsedDuration
+        durationDays: parsedDuration,
+        useLiveApi: boolLive
       });
+
+      if (results && results.status === 'scraping') {
+        return res.json(results);
+      }
 
       return res.json({ mode: 'normal', total: results.length, results });
     }

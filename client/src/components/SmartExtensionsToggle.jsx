@@ -20,7 +20,7 @@ export default function SmartExtensionsToggle({
         <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
           Filtros & Extensões Inteligentes de Agenda
         </h3>
-        <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-full">
+        <span className="px-2 py-0.5 text-xs font-extrabold uppercase bg-amber-400/10 text-amber-400 border border-amber-400/20 rounded-full">
           Diferencial Fly2Gether
         </span>
       </div>

@@ -4,6 +4,13 @@ import { AIRPORTS } from '../data/airports.js';
 // Cache para evitar requisições repetidas
 const airportCache = new Map();
 
+function normalizeText(text) {
+  return (text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 /**
  * Busca de aeroportos globais via API online e base expandida
  */
@@ -18,13 +25,15 @@ export async function searchGlobalAirports(query) {
     return airportCache.get(q);
   }
 
+  const normalizedQ = normalizeText(q);
+
   // 1. Filtrar localmente na nossa base expandida
   const localMatches = AIRPORTS.filter(item => {
     return (
-      item.iata.toLowerCase().includes(q) ||
-      item.city.toLowerCase().includes(q) ||
-      item.name.toLowerCase().includes(q) ||
-      item.country.toLowerCase().includes(q)
+      normalizeText(item.iata).includes(normalizedQ) ||
+      normalizeText(item.city).includes(normalizedQ) ||
+      normalizeText(item.name).includes(normalizedQ) ||
+      normalizeText(item.country).includes(normalizedQ)
     );
   });
 

@@ -124,7 +124,7 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
                   className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 transition-all flex justify-between items-start"
                 >
                   <div className="space-y-1">
-                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md uppercase ${
+                    <span className={`px-2 py-0.5 text-xs font-bold rounded-md uppercase ${
                       item.mode === 'flytogether' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
                     }`}>
                       {item.mode === 'flytogether' ? 'Fly Together' : 'Voo Simples'}
@@ -141,7 +141,7 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
                     <p className="text-xs text-slate-400">
                       Teto máximo: <strong className="text-emerald-400">R$ {item.maxBudgetCombined}</strong>
                     </p>
-                    <p className="text-[11px] text-slate-500 flex items-center space-x-1">
+                    <p className="text-xs text-slate-500 flex items-center space-x-1">
                       <Mail className="w-3 h-3 text-slate-400" />
                       <span>{item.notifyEmail}</span>
                     </p>

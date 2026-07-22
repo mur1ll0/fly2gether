@@ -1,5 +1,8 @@
 import { searchGoogleFlights } from './providers/googleFlightsProvider.js';
 import { searchDuffelFlights } from './providers/duffelProvider.js';
+import FlightCache from '../models/FlightCache.js';
+import { scrapeGoogleFlights } from './providers/googleFlightsScraper.js';
+import { triggerGithubScraper } from '../utils/githubDispatcher.js';
 
 // Lista de feriados nacionais do Brasil (2026 e 2027) para fins de emendas e finais de semana prolongados
 const HOLIDAYS = [
@@ -221,6 +224,327 @@ function calculateSharedStayMinutes(f1, f2, departureDate, returnDate) {
   }
 }
 
+// Helper to generate mock flights as fallback
+function generateMockFlights(origin, destination, departureDate, returnDate, pair = {}) {
+  const basePrice = getRouteBasePrice(origin, destination);
+  const mockOffers = [];
+  
+  for (const airline of AIRLINES) {
+    const dayHash = (new Date(departureDate).getDate() * 17 + airline.code.charCodeAt(0)) % 40;
+    const isMegaPromo = dayHash < 10;
+    const discount = isMegaPromo ? 0.35 : 0;
+
+    const priceOutbound = Math.round((basePrice * (0.85 + (dayHash / 100))) * (1 - discount));
+    const priceInbound = returnDate ? Math.round((basePrice * (0.80 + (dayHash / 120))) * (1 - discount)) : 0;
+    const totalPrice = priceOutbound + priceInbound;
+
+    const depHour = 7 + (dayHash % 14);
+    const arrHour = (depHour + 2) % 24;
+    const retDepHour = 16 + (dayHash % 6);
+    const retArrHour = (retDepHour + 2) % 24;
+
+    const isXAP = origin.toUpperCase() === 'XAP';
+    const stopsDetails = isXAP ? '1 escala em Campinas (VCP)' : 'Direto';
+    const stopsCount = isXAP ? 1 : 0;
+    const stopsList = isXAP ? [{ city: 'Campinas', iata: 'VCP', name: 'Aeroporto Internacional de Viracopos' }] : [];
+
+    const fNumber = `${airline.code} ${3000 + (dayHash % 6000)}`;
+    const retFNumber = returnDate ? `${airline.code} ${4000 + (dayHash % 6000)}` : null;
+    const airplaneModel = isXAP ? 'Boeing 737-800' : 'Airbus A320neo';
+
+    const formatTime = (h, m) => `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+    mockOffers.push({
+      id: `mock-${origin}-${destination}-${airline.code}-${departureDate}`,
+      airline: {
+        code: airline.code,
+        name: airline.name,
+        logo: `https://www.gstatic.com/flights/airline_logos/70px/${airline.code}.png`
+      },
+      origin,
+      destination,
+      departureDate,
+      returnDate,
+      departureTime: formatTime(depHour, 15),
+      arrivalTime: formatTime(arrHour, 45),
+      returnDepartureTime: returnDate ? formatTime(retDepHour, 10) : null,
+      returnArrivalTime: returnDate ? formatTime(retArrHour, 40) : null,
+      duration: isXAP ? '4h 15m' : '2h 30m',
+      returnDuration: isXAP ? '4h 15m' : '2h 30m',
+      flightNumber: fNumber,
+      airplane: airplaneModel,
+      returnFlightNumber: retFNumber,
+      returnAirplane: returnDate ? airplaneModel : null,
+      outboundPrice: priceOutbound,
+      inboundPrice: priceInbound,
+      totalPrice,
+      isMegaPromo,
+      promoTag: isMegaPromo ? '🔥 Mega Promoção LATAM/GOL/Azul (-35%)' : null,
+      isWeekendOrHoliday: pair.isWeekendOrHoliday || false,
+      holidayDetails: pair.holidayDetails || null,
+      stopsCount,
+      stopsDetails,
+      stopsList,
+      returnStopsCount: stopsCount,
+      returnStopsList: stopsList,
+      departureToken: returnDate ? `mock-token-${origin}-${destination}-${airline.code}-${departureDate}` : null,
+      bookingUrl: `https://www.google.com/travel/flights?q=Voos%20de%20${origin}%20para%20${destination}`,
+      provider: 'Simulador Fly2Gether'
+    });
+  }
+  return mockOffers;
+}
+
+// Combina voos de ida e volta do cache de pernas únicas
+function pairOneWayFlights(outboundFlights, inboundFlights, returnDate) {
+  const paired = [];
+  outboundFlights.slice(0, 15).forEach((out, outIdx) => {
+    inboundFlights.slice(0, 15).forEach((inb, inbIdx) => {
+      const totalPrice = out.totalPrice + inb.totalPrice;
+      paired.push({
+        id: `gflight-${out.origin}-${out.destination}-${outIdx}-${inbIdx}-${Date.now()}`,
+        airline: out.airline,
+        origin: out.origin,
+        destination: out.destination,
+        departureDate: out.departureDate,
+        returnDate: returnDate,
+
+        // Ida (Outbound)
+        departureTime: out.departureTime,
+        arrivalTime: out.arrivalTime,
+        duration: out.duration,
+        stopsCount: out.stopsCount,
+        stopsList: out.stopsList,
+        hasAirportTransfer: out.hasAirportTransfer,
+        flightNumber: out.flightNumber,
+        airplane: out.airplane,
+
+        // Volta (Inbound)
+        returnDepartureTime: inb.departureTime,
+        returnArrivalTime: inb.arrivalTime,
+        returnDuration: inb.duration,
+        returnStopsCount: inb.stopsCount,
+        returnStopsList: inb.stopsList,
+        returnHasAirportTransfer: inb.hasAirportTransfer,
+        returnFlightNumber: inb.flightNumber,
+        returnAirplane: inb.airplane,
+
+        outboundPrice: out.totalPrice,
+        inboundPrice: inb.totalPrice,
+        totalPrice,
+        isMegaPromo: out.isMegaPromo || inb.isMegaPromo,
+        bookingUrl: out.bookingUrl,
+        provider: 'Google Flights (cache)'
+      });
+    });
+  });
+  return paired.sort((a, b) => a.totalPrice - b.totalPrice);
+}
+
+// Aciona a revalidação da leg em segundo plano
+function triggerRevalidation(origin, destination, date) {
+  const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
+  if (isLocal) {
+    // Executa em background de forma assíncrona no Node local
+    Promise.resolve().then(async () => {
+      try {
+        console.log(`[Background Revalidate] Iniciando Puppeteer local assíncrono para ${origin}➔${destination}...`);
+        const flightsList = await scrapeGoogleFlights({ origin, destination, departureDate: date });
+        if (flightsList && flightsList.length > 0) {
+          await FlightCache.findOneAndUpdate(
+            { origin, destination, departureDate: date, returnDate: null },
+            { flights: flightsList, scrapedAt: new Date(), source: 'scraper' },
+            { upsert: true }
+          );
+          console.log(`[Background Revalidate] Cache local revalidado com sucesso!`);
+        }
+      } catch (e) {
+        console.error(`[Background Revalidate] Erro ao revalidar localmente:`, e.message);
+      }
+    });
+  } else {
+    // Em produção (Vercel), dispara o GitHub Actions de revalidação
+    console.log(`[Background Revalidate] Disparando Actions no GitHub para ${origin}➔${destination}...`);
+    triggerGithubScraper(origin, destination, date).catch(() => {});
+  }
+}
+
+// Aciona a revalidação do par de voos da SerpAPI em segundo plano
+function revalidateLiveSearch(origin, destination, departureDate, returnDate) {
+  Promise.resolve().then(async () => {
+    try {
+      console.log(`[Background Revalidate API] Iniciando SerpAPI em background para ${origin}➔${destination}...`);
+      const liveOffers = await searchGoogleFlights({ origin, destination, departureDate, returnDate });
+      if (liveOffers && liveOffers.length > 0) {
+        await FlightCache.findOneAndUpdate(
+          { origin, destination, departureDate, returnDate },
+          { flights: liveOffers, scrapedAt: new Date(), source: 'api' },
+          { upsert: true }
+        );
+        console.log(`[Background Revalidate API] Cache de API revalidado com sucesso!`);
+      }
+    } catch (e) {
+      console.error(`[Background Revalidate API] Erro ao revalidar API:`, e.message);
+    }
+  });
+}
+
+// Resolve voos de perna única (One-Way) usando Cache unificado + SWR + Scraper Local/Nuvem
+async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
+  const originUpper = origin.toUpperCase();
+  const destUpper = destination.toUpperCase();
+  const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // 1. Tentar encontrar no Cache do MongoDB
+  const cached = await FlightCache.findOne({
+    origin: originUpper,
+    destination: destUpper,
+    departureDate: date,
+    returnDate: null
+  });
+
+  if (cached) {
+    const isFresh = cached.scrapedAt >= freshThreshold;
+    if (isFresh) {
+      console.log(`[Cache Hit] Perna fresca: ${originUpper}➔${destUpper} em ${date}`);
+      return cached.flights;
+    } else {
+      console.log(`[Cache Stale] Perna expirada. Retornando cache e revalidando: ${originUpper}➔${destUpper} em ${date}`);
+      triggerRevalidation(originUpper, destUpper, date);
+      // Retorna marcando como dados históricos expirados
+      return cached.flights.map(f => ({ ...f, isStaleCache: true, cachedAt: cached.scrapedAt }));
+    }
+  }
+
+  // 2. Cache Miss: Rota não cadastrada no MongoDB
+  console.log(`[Cache Miss] Perna inédita: ${originUpper}➔${destUpper} em ${date}`);
+
+  // Se local, executa síncrono para dar resposta imediata ao dev
+  const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
+  if (isLocal) {
+    console.log(`[Local Scrape] Executando Puppeteer síncrono local...`);
+    try {
+      const flightsList = await scrapeGoogleFlights({ origin: originUpper, destination: destUpper, departureDate: date });
+      if (flightsList && flightsList.length > 0) {
+        await FlightCache.findOneAndUpdate(
+          { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+          { flights: flightsList, scrapedAt: new Date(), source: 'scraper' },
+          { upsert: true }
+        );
+        return flightsList;
+      }
+      // Se falhar a raspagem, retorna simulador como contingência
+      console.warn(`[Local Scrape] Raspagem retornou vazia. Usando simulador como contingência.`);
+      return generateMockFlights(originUpper, destUpper, date, null);
+    } catch (err) {
+      console.error(`[Local Scrape] Falha crítica de raspagem local. Usando simulador.`, err.message);
+      return generateMockFlights(originUpper, destUpper, date, null);
+    }
+  }
+
+  // Em Produção (Vercel)
+  if (useLiveApi) {
+    // Se for modo pago, busca na API imediatamente
+    console.log(`[API Fallback] Buscando perna única via SerpAPI...`);
+    try {
+      const liveOffers = await searchGoogleFlights({ origin: originUpper, destination: destUpper, departureDate: date });
+      if (liveOffers && liveOffers.length > 0) {
+        await FlightCache.findOneAndUpdate(
+          { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+          { flights: liveOffers, scrapedAt: new Date(), source: 'api' },
+          { upsert: true }
+        );
+        return liveOffers;
+      }
+      return generateMockFlights(originUpper, destUpper, date, null);
+    } catch (err) {
+      console.error(`[API Fallback] Falha no SerpAPI. Usando simulador.`, err.message);
+      return generateMockFlights(originUpper, destUpper, date, null);
+    }
+  } else {
+    // Modo Robô gratuito em produção: dispara a Actions do GitHub e avisa o frontend para fazer polling
+    console.log(`[GitHub Trigger] Agendando raspagem da perna no GitHub Actions...`);
+    await triggerGithubScraper(originUpper, destUpper, date);
+    return {
+      status: 'scraping',
+      message: 'Aguarde um momento. Nosso robô está coletando as passagens aéreas...'
+    };
+  }
+}
+
+// Resolve o par de voos (Ida + Volta)
+async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi }) {
+  const originUpper = origin.toUpperCase();
+  const destUpper = destination.toUpperCase();
+  const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // Caso 1: Modo API Paga (Tratamento unificado com cache)
+  if (returnDate && useLiveApi) {
+    const cached = await FlightCache.findOne({
+      origin: originUpper,
+      destination: destUpper,
+      departureDate,
+      returnDate
+    });
+
+    if (cached) {
+      const isFresh = cached.scrapedAt >= freshThreshold;
+      if (isFresh) {
+        console.log(`[Cache Hit API] Retornando cache combinado de API: ${originUpper}-${destUpper}`);
+        return cached.flights;
+      } else {
+        console.log(`[Cache Stale API] Cache combinado expirado. Revalidando API em background...`);
+        revalidateLiveSearch(originUpper, destUpper, departureDate, returnDate);
+        return cached.flights.map(f => ({ ...f, isStaleCache: true, cachedAt: cached.scrapedAt }));
+      }
+    }
+
+    // Se não há cache, faz consulta real e salva
+    console.log(`[Cache Miss API] Executando chamada SerpAPI combinada...`);
+    try {
+      const liveOffers = await searchGoogleFlights({ origin: originUpper, destination: destUpper, departureDate, returnDate });
+      if (liveOffers && liveOffers.length > 0) {
+        await FlightCache.findOneAndUpdate(
+          { origin: originUpper, destination: destUpper, departureDate, returnDate },
+          { flights: liveOffers, scrapedAt: new Date(), source: 'api' },
+          { upsert: true }
+        );
+        return liveOffers;
+      }
+      return generateMockFlights(originUpper, destUpper, departureDate, returnDate);
+    } catch (err) {
+      console.error(`[API Call Error] Usando simulador como contingência.`, err.message);
+      return generateMockFlights(originUpper, destUpper, departureDate, returnDate);
+    }
+  }
+
+  // Caso 2: Modo Robô Econômico (Combina duas pernas raspadas de ida e volta)
+  if (returnDate && !useLiveApi) {
+    const outboundFlights = await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi);
+    const inboundFlights = await resolveOneWayLeg(destUpper, originUpper, returnDate, useLiveApi);
+
+    // Se alguma das pernas estiver raspando, retorna status de carregamento
+    if (outboundFlights.status === 'scraping' || inboundFlights.status === 'scraping') {
+      return {
+        status: 'scraping',
+        message: 'O robô está coletando voos de ida ou volta. Aguarde...'
+      };
+    }
+
+    const paired = pairOneWayFlights(outboundFlights, inboundFlights, returnDate);
+    
+    // Propaga aviso de cache expirado se houver
+    const isStale = outboundFlights.some(f => f.isStaleCache) || inboundFlights.some(f => f.isStaleCache);
+    if (isStale) {
+      return paired.map(f => ({ ...f, isStaleCache: true }));
+    }
+    return paired;
+  }
+
+  // Caso 3: Perna única (One-Way)
+  return await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi);
+}
+
 // 1. MODO 1: Busca de Voos Únicos (Simples)
 export async function searchSingleFlights({
   origin,
@@ -231,25 +555,29 @@ export async function searchSingleFlights({
   isVacation = false,
   vacationStart,
   vacationEnd,
-  durationDays = 4
+  durationDays = 4,
+  useLiveApi = false
 }) {
-  const hasLiveApiKey = Boolean(process.env.SERPAPI_KEY || process.env.DUFFEL_API_TOKEN);
-  const providerPreference = process.env.FLIGHT_PROVIDER || 'googleflights'; // 'googleflights' | 'duffel'
+  // Conversão rápida de booleano
+  const boolLive = useLiveApi === 'true' || useLiveApi === true;
 
-  // Geração de datas inteligência (flexibilidade)
+  // Geração de datas inteligente (flexibilidade)
   let candidateDates = [];
   if (!departureDate) {
     if (isVacation && vacationStart && vacationEnd) {
       candidateDates = generateVacationCandidateDates(vacationStart, vacationEnd, durationDays);
     } else if (onlyWeekends) {
-      candidateDates = generateWeekendCandidateDates().slice(0, 4); // Pegar os próximos 4 finais de semana
+      const weekendsCount = parseInt(process.env.SCRAPER_WEEKENDS_COUNT) || 8;
+      candidateDates = generateWeekendCandidateDates().slice(0, weekendsCount);
     } else {
-      // Amostragem padrão flexível: 6 datas de partida de 2 em 2 dias a partir de hoje
+      const daysAhead = parseInt(process.env.DEFAULT_SEARCH_DAYS_AHEAD) || 60;
+      const stepDays = parseInt(process.env.DEFAULT_SEARCH_STEP_DAYS) || 3;
+      const numSteps = Math.ceil(daysAhead / stepDays);
       const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      for (let i = 0; i < 6; i++) {
+
+      for (let i = 0; i < numSteps; i++) {
         const d = new Date(today);
-        d.setDate(today.getDate() + 1 + i * 2);
+        d.setDate(today.getDate() + 1 + i * stepDays);
         const depStr = d.toISOString().split('T')[0];
 
         let retStr = null;
@@ -278,114 +606,40 @@ export async function searchSingleFlights({
 
   const results = [];
 
-  // Executar buscas em paralelo para otimizar velocidade
+  // Executa as varreduras de cache / revalidações
   const searchPromises = candidateDates.map(async (pair) => {
-    let liveOffers = null;
+    const flightResults = await resolveFlightsForPair({
+      origin,
+      destination,
+      departureDate: pair.departureDate,
+      returnDate: pair.returnDate,
+      useLiveApi: boolLive
+    });
 
-    if (hasLiveApiKey) {
-      if (providerPreference === 'googleflights' || process.env.SERPAPI_KEY) {
-        liveOffers = await searchGoogleFlights({
-          origin,
-          destination,
-          departureDate: pair.departureDate,
-          returnDate: pair.returnDate
-        });
-      }
-
-      if (!liveOffers && (providerPreference === 'duffel' || process.env.DUFFEL_API_TOKEN)) {
-        liveOffers = await searchDuffelFlights({
-          origin,
-          destination,
-          departureDate: pair.departureDate,
-          returnDate: pair.returnDate
-        });
-      }
+    if (flightResults && flightResults.status === 'scraping') {
+      return flightResults; // Propaga objeto de scraping
     }
 
-    if (liveOffers && liveOffers.length > 0) {
-      return liveOffers.map(flight => ({
-        ...flight,
-        isWeekendOrHoliday: pair.isWeekendOrHoliday,
-        holidayDetails: pair.holidayDetails
-      }));
-    } else {
-      // Fallback: Simulador de contingência inteligente
-      const basePrice = getRouteBasePrice(origin, destination);
-      const mockOffers = [];
-      
-      for (const airline of AIRLINES) {
-        const dayHash = (new Date(pair.departureDate).getDate() * 17 + airline.code.charCodeAt(0)) % 40;
-        const isMegaPromo = dayHash < 10;
-        const discount = isMegaPromo ? 0.35 : 0;
-
-        const priceOutbound = Math.round((basePrice * (0.85 + (dayHash / 100))) * (1 - discount));
-        const priceInbound = pair.returnDate ? Math.round((basePrice * (0.80 + (dayHash / 120))) * (1 - discount)) : 0;
-        const totalPrice = priceOutbound + priceInbound;
-
-        const depHour = 7 + (dayHash % 14);
-        const arrHour = (depHour + 2) % 24;
-        const retDepHour = 16 + (dayHash % 6);
-        const retArrHour = (retDepHour + 2) % 24;
-
-        // Gerar conexões realistas de simulador para origens pequenas (como XAP)
-        const isXAP = origin.toUpperCase() === 'XAP';
-        const stopsDetails = isXAP ? '1 escala em Campinas (VCP)' : 'Direto';
-        const stopsCount = isXAP ? 1 : 0;
-        const stopsList = isXAP ? [{ city: 'Campinas', iata: 'VCP', name: 'Aeroporto Internacional de Viracopos' }] : [];
-
-        const fNumber = `${airline.code} ${3000 + (dayHash % 6000)}`;
-        const retFNumber = pair.returnDate ? `${airline.code} ${4000 + (dayHash % 6000)}` : null;
-        const airplaneModel = isXAP ? 'Boeing 737-800' : 'Airbus A320neo';
-
-        const formatTime = (h, m) => `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-
-        mockOffers.push({
-          id: `mock-${origin}-${destination}-${airline.code}-${pair.departureDate}`,
-          airline: {
-            code: airline.code,
-            name: airline.name,
-            logo: `https://www.gstatic.com/flights/airline_logos/70px/${airline.code}.png`
-          },
-          origin,
-          destination,
-          departureDate: pair.departureDate,
-          returnDate: pair.returnDate,
-          departureTime: formatTime(depHour, 15),
-          arrivalTime: formatTime(arrHour, 45),
-          returnDepartureTime: pair.returnDate ? formatTime(retDepHour, 10) : null,
-          returnArrivalTime: pair.returnDate ? formatTime(retArrHour, 40) : null,
-          duration: isXAP ? '4h 15m' : '2h 30m',
-          returnDuration: isXAP ? '4h 15m' : '2h 30m',
-          flightNumber: fNumber,
-          airplane: airplaneModel,
-          returnFlightNumber: retFNumber,
-          returnAirplane: pair.returnDate ? airplaneModel : null,
-          outboundPrice: priceOutbound,
-          inboundPrice: priceInbound,
-          totalPrice,
-          isMegaPromo,
-          promoTag: isMegaPromo ? '🔥 Mega Promoção LATAM/GOL/Azul (-35%)' : null,
-          isWeekendOrHoliday: pair.isWeekendOrHoliday,
-          holidayDetails: pair.holidayDetails,
-          stopsCount,
-          stopsDetails,
-          stopsList,
-          returnStopsCount: stopsCount,
-          returnStopsList: stopsList,
-          departureToken: pair.returnDate ? `mock-token-${origin}-${destination}-${airline.code}-${pair.departureDate}` : null,
-          bookingUrl: `https://www.google.com/travel/flights?q=Voos%20de%20${origin}%20para%20${destination}`,
-          provider: 'Simulador Fly2Gether'
-        });
-      }
-      return mockOffers;
-    }
+    return (flightResults || []).map(flight => ({
+      ...flight,
+      isWeekendOrHoliday: pair.isWeekendOrHoliday,
+      holidayDetails: pair.holidayDetails
+    }));
   });
 
   const resolvedBatches = await Promise.all(searchPromises);
+
+  // Se houver algum em processo de raspagem na fila, retorna sinalização
+  const scrapingBatch = resolvedBatches.find(batch => batch && batch.status === 'scraping');
+  if (scrapingBatch) {
+    return scrapingBatch;
+  }
+
   resolvedBatches.forEach(batch => {
-    if (batch) results.push(...batch);
+    if (Array.isArray(batch)) results.push(...batch);
   });
 
+  // Ordenação final
   results.sort((a, b) => {
     if (a.isMegaPromo && !b.isMegaPromo) return -1;
     if (!a.isMegaPromo && b.isMegaPromo) return 1;
@@ -407,7 +661,8 @@ export async function searchCombinedFlights({
   isVacation = false,
   vacationStart,
   vacationEnd,
-  durationDays = 4
+  durationDays = 4,
+  useLiveApi = false
 }) {
   const [person1Flights, person2Flights] = await Promise.all([
     searchSingleFlights({
@@ -419,7 +674,8 @@ export async function searchCombinedFlights({
       isVacation,
       vacationStart,
       vacationEnd,
-      durationDays
+      durationDays,
+      useLiveApi
     }),
     searchSingleFlights({
       origin: origin2,
@@ -430,9 +686,13 @@ export async function searchCombinedFlights({
       isVacation,
       vacationStart,
       vacationEnd,
-      durationDays
+      durationDays,
+      useLiveApi
     })
   ]);
+
+  if (person1Flights && person1Flights.status === 'scraping') return person1Flights;
+  if (person2Flights && person2Flights.status === 'scraping') return person2Flights;
 
   const combinedResults = [];
 
@@ -479,6 +739,7 @@ export async function searchCombinedFlights({
             returnStopsCount: f1.returnStopsCount || 0,
             returnStopsList: f1.returnStopsList || [],
             hasAirportTransfer: f1.hasAirportTransfer,
+            returnHasAirportTransfer: f1.returnHasAirportTransfer,
             bookingUrl: f1.bookingUrl
           },
           person2: {
@@ -501,6 +762,7 @@ export async function searchCombinedFlights({
             returnStopsCount: f2.returnStopsCount || 0,
             returnStopsList: f2.returnStopsList || [],
             hasAirportTransfer: f2.hasAirportTransfer,
+            returnHasAirportTransfer: f2.returnHasAirportTransfer,
             bookingUrl: f2.bookingUrl
           },
           combinedPrice,
@@ -525,5 +787,6 @@ export async function searchCombinedFlights({
     return a.combinedPrice - b.combinedPrice;
   });
 
-  return combinedResults;
+  // Limitar as melhores 5000 opções para evitar estouro de memória e lentidão de carregamento
+  return combinedResults.slice(0, 5000);
 }

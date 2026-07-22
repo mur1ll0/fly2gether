@@ -5,6 +5,16 @@ import { formatToBrazillianDate } from '../utils/dateFormatter';
 export default function CombinedFlightCard({ combined, onCreateAlert }) {
   const { person1, person2, destination, departureDate, returnDate, combinedPrice, arrivalDeltaMinutes, isSynchronized, hasPromo, isWeekendOrHoliday, holidayDetails } = combined;
 
+  const getReturnDepartureDelta = () => {
+    if (person1.returnDepartureTime && person2.returnDepartureTime) {
+      const [h1, m1] = person1.returnDepartureTime.split(':').map(Number);
+      const [h2, m2] = person2.returnDepartureTime.split(':').map(Number);
+      return Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
+    }
+    return null;
+  };
+  const returnDepartureDelta = getReturnDepartureDelta();
+
   const handleBooking = () => {
     if (person1.bookingUrl && person2.bookingUrl) {
       window.open(person1.bookingUrl, '_blank');
@@ -85,10 +95,10 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
             
             {/* Timeline Ida (Outbound) */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                 <span>✈️ IDA ({formatToBrazillianDate(departureDate)})</span>
                 {(person1.flightNumber || person1.airplane) && (
-                  <span className="font-mono text-[9px] text-slate-500 font-normal">
+                  <span className="font-mono text-xs text-slate-400 font-semibold">
                     {person1.flightNumber} {person1.airplane ? `• ${person1.airplane}` : ''}
                   </span>
                 )}
@@ -99,7 +109,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
               <div className="flex items-center space-x-3 bg-slate-900/60 p-3 rounded-lg border border-slate-800">
                 <div className="text-center min-w-[50px]">
                   <p className="text-sm font-extrabold text-slate-100">{person1.departureTime}</p>
-                  <p className="text-[10px] font-bold text-brand-400 font-mono">{person1.origin}</p>
+                  <p className="text-xs font-bold text-brand-400 font-mono">{person1.origin}</p>
                 </div>
 
                 <div className="flex-1 flex flex-col items-center relative py-1">
@@ -129,7 +139,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                 <div className="text-center min-w-[50px]">
                   <p className="text-sm font-extrabold text-slate-100">{person1.arrivalTime}</p>
-                  <p className="text-[10px] font-bold text-brand-400 font-mono">{destination}</p>
+                  <p className="text-xs font-bold text-brand-400 font-mono">{destination}</p>
                 </div>
               </div>
             </div>
@@ -137,10 +147,10 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
             {/* Timeline Volta (Inbound) */}
             {returnDate && (
               <div className="space-y-1 mt-3">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+                <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                   <span>🔄 VOLTA ({formatToBrazillianDate(returnDate)})</span>
                   {(person1.returnFlightNumber || person1.returnAirplane) && (
-                    <span className="font-mono text-[9px] text-slate-500 font-normal">
+                    <span className="font-mono text-xs text-slate-400 font-semibold">
                       {person1.returnFlightNumber} {person1.returnAirplane ? `• ${person1.returnAirplane}` : ''}
                     </span>
                   )}
@@ -151,7 +161,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
                 <div className="flex items-center space-x-3 bg-slate-900/40 p-3 rounded-lg border border-slate-850">
                   <div className="text-center min-w-[50px]">
                     <p className="text-sm font-extrabold text-slate-100">{person1.returnDepartureTime || '17:30'}</p>
-                    <p className="text-[10px] font-bold text-brand-400 font-mono">{destination}</p>
+                    <p className="text-xs font-bold text-brand-400 font-mono">{destination}</p>
                   </div>
 
                   <div className="flex-1 flex flex-col items-center relative py-1">
@@ -181,7 +191,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                   <div className="text-center min-w-[50px]">
                     <p className="text-sm font-extrabold text-slate-100">{person1.returnArrivalTime || '20:00'}</p>
-                    <p className="text-[10px] font-bold text-brand-400 font-mono">{person1.origin}</p>
+                    <p className="text-xs font-bold text-brand-400 font-mono">{person1.origin}</p>
                   </div>
                 </div>
               </div>
@@ -189,7 +199,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
           </div>
 
           <div className="pt-2 border-t border-slate-800/60 flex justify-between items-center text-xs">
-            <span className="text-[11px] text-slate-400 font-sans truncate">
+            <span className="text-xs text-slate-400 font-sans truncate">
               Voo de Ida: {person1.stopsDetails || 'Direto'}
             </span>
             <span className="font-bold text-emerald-400 font-mono">R$ {person1.price}</span>
@@ -224,10 +234,10 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
             {/* Timeline Ida (Outbound) */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                 <span>✈️ IDA ({formatToBrazillianDate(departureDate)})</span>
                 {(person2.flightNumber || person2.airplane) && (
-                  <span className="font-mono text-[9px] text-slate-500 font-normal">
+                  <span className="font-mono text-xs text-slate-400 font-semibold">
                     {person2.flightNumber} {person2.airplane ? `• ${person2.airplane}` : ''}
                   </span>
                 )}
@@ -238,7 +248,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
               <div className="flex items-center space-x-3 bg-slate-900/60 p-3 rounded-lg border border-slate-800">
                 <div className="text-center min-w-[50px]">
                   <p className="text-sm font-extrabold text-slate-100">{person2.departureTime}</p>
-                  <p className="text-[10px] font-bold text-purple-400 font-mono">{person2.origin}</p>
+                  <p className="text-xs font-bold text-purple-400 font-mono">{person2.origin}</p>
                 </div>
 
                 <div className="flex-1 flex flex-col items-center relative py-1">
@@ -268,7 +278,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                 <div className="text-center min-w-[50px]">
                   <p className="text-sm font-extrabold text-slate-100">{person2.arrivalTime}</p>
-                  <p className="text-[10px] font-bold text-purple-400 font-mono">{destination}</p>
+                  <p className="text-xs font-bold text-purple-400 font-mono">{destination}</p>
                 </div>
               </div>
             </div>
@@ -276,10 +286,10 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
             {/* Timeline Volta (Inbound) */}
             {returnDate && (
               <div className="space-y-1 mt-3">
-                <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold">
+                <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                   <span>🔄 VOLTA ({formatToBrazillianDate(returnDate)})</span>
                   {(person2.returnFlightNumber || person2.returnAirplane) && (
-                    <span className="font-mono text-[9px] text-slate-500 font-normal">
+                    <span className="font-mono text-xs text-slate-400 font-semibold">
                       {person2.returnFlightNumber} {person2.returnAirplane ? `• ${person2.returnAirplane}` : ''}
                     </span>
                   )}
@@ -290,7 +300,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
                 <div className="flex items-center space-x-3 bg-slate-900/40 p-3 rounded-lg border border-slate-850">
                   <div className="text-center min-w-[50px]">
                     <p className="text-sm font-extrabold text-slate-100">{person2.returnDepartureTime || '17:30'}</p>
-                    <p className="text-[10px] font-bold text-purple-400 font-mono">{destination}</p>
+                    <p className="text-xs font-bold text-purple-400 font-mono">{destination}</p>
                   </div>
 
                   <div className="flex-1 flex flex-col items-center relative py-1">
@@ -320,7 +330,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                   <div className="text-center min-w-[50px]">
                     <p className="text-sm font-extrabold text-slate-100">{person2.returnArrivalTime || '20:00'}</p>
-                    <p className="text-[10px] font-bold text-purple-400 font-mono">{person2.origin}</p>
+                    <p className="text-xs font-bold text-purple-400 font-mono">{person2.origin}</p>
                   </div>
                 </div>
               </div>
@@ -328,7 +338,7 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
           </div>
 
           <div className="pt-2 border-t border-slate-800/60 flex justify-between items-center text-xs">
-            <span className="text-[11px] text-slate-400 font-sans truncate">
+            <span className="text-xs text-slate-400 font-sans truncate">
               Voo de Ida: {person2.stopsDetails || 'Direto'}
             </span>
             <span className="font-bold text-emerald-400 font-mono">R$ {person2.price}</span>
@@ -337,21 +347,38 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
       </div>
 
-      {/* Bottom Footer: Dates, Combined Price & Action Buttons */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-3 border-t border-slate-800">
-        <div className="text-xs text-slate-400 space-y-1 text-center sm:text-left">
-          <p>📅 Período: <strong className="text-slate-200">{formatToBrazillianDate(departureDate)}</strong> {returnDate ? `até ${formatToBrazillianDate(returnDate)}` : ''}</p>
-          <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-500 font-mono">
-            <span>⏱️ Diferença no aeroporto: {arrivalDeltaMinutes} minutos</span>
+        <div className="text-sm text-slate-300 space-y-1.5 text-center sm:text-left">
+          <p>
+            📅 Período: <strong className="text-slate-100 font-extrabold">{formatToBrazillianDate(departureDate)}</strong>{' '}
+            {returnDate ? (
+              <>
+                até <strong className="text-slate-100 font-extrabold">{formatToBrazillianDate(returnDate)}</strong>
+              </>
+            ) : (
+              ''
+            )}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-400 font-sans font-medium">
+            <span className="text-slate-300">
+              ⏱️ Chegada: <strong className="text-brand-400 font-bold">{arrivalDeltaMinutes}m</strong>
+            </span>
+            {returnDepartureDelta !== null && (
+              <span className="text-slate-300">
+                ⏱️ Saída: <strong className="text-purple-400 font-bold">{returnDepartureDelta}m</strong>
+              </span>
+            )}
             {combined.sharedStayFormatted && combined.sharedStayFormatted !== 'N/A' && (
-              <span className="text-purple-400 font-bold">❤️ Tempo Juntos: {combined.sharedStayFormatted}</span>
+              <span className="text-purple-300 font-bold bg-purple-500/10 px-2 py-0.5 border border-purple-500/20 rounded-md">
+                ❤️ Tempo Juntos: {combined.sharedStayFormatted}
+              </span>
             )}
           </div>
         </div>
 
         <div className="flex items-center space-x-4">
           <div className="text-right">
-            <p className="text-[10px] text-slate-400 uppercase font-semibold">Total Combinado</p>
+            <p className="text-xs text-slate-400 uppercase font-semibold">Total Combinado</p>
             <p className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-400 to-amber-300">
               R$ {combinedPrice.toLocaleString('pt-BR')}
             </p>
