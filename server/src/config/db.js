@@ -28,8 +28,9 @@ export async function connectDB() {
   }
 
   try {
+    mongoose.set('bufferCommands', false);
     const db = await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 3000,
     });
     isConnected = db.connections[0].readyState === 1;
     console.log('✅ MongoDB Conectado com Sucesso!');
@@ -40,7 +41,7 @@ export async function connectDB() {
       try {
         dns.setServers(['8.8.8.8', '8.8.4.4']);
         const db = await mongoose.connect(mongoUri, {
-          serverSelectionTimeoutMS: 5000,
+          serverSelectionTimeoutMS: 3000,
         });
         isConnected = db.connections[0].readyState === 1;
         console.log('✅ MongoDB Conectado com Sucesso via Google DNS!');
