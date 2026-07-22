@@ -736,11 +736,11 @@ export async function searchCombinedFlights({
   const p2IsScraping = person2Flights && person2Flights.status === 'scraping';
 
   if (p1IsScraping || p2IsScraping) {
-    const p1Completed = p1IsScraping ? (person1Flights.completedCount || 0) : (Array.isArray(person1Flights) ? person1Flights.length : 8);
     const p1Total = p1IsScraping ? (person1Flights.totalCount || 8) : 8;
+    const p1Completed = p1IsScraping ? (person1Flights.completedCount || 0) : p1Total;
 
-    const p2Completed = p2IsScraping ? (person2Flights.completedCount || 0) : (Array.isArray(person2Flights) ? person2Flights.length : 8);
     const p2Total = p2IsScraping ? (person2Flights.totalCount || 8) : 8;
+    const p2Completed = p2IsScraping ? (person2Flights.completedCount || 0) : p2Total;
 
     const totalCompleted = p1Completed + p2Completed;
     const totalCount = p1Total + p2Total;
