@@ -18,8 +18,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Conectar ao MongoDB
-connectDB();
+// Middleware para garantir que o banco está conectado antes de processar qualquer requisição
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('❌ Falha de conexão com banco de dados:', err.message);
+    res.status(500).json({ error: 'Erro ao conectar ao banco de dados.' });
+  }
+});
 
 // Rotas da API
 app.use('/api', apiRoutes);
