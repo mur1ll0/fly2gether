@@ -7,7 +7,8 @@ const FlightCacheSchema = new mongoose.Schema({
   returnDate: { type: String }, // Format: YYYY-MM-DD (optional)
   flights: { type: Array, required: true },
   scrapedAt: { type: Date, default: Date.now },
-  source: { type: String, enum: ['api', 'scraper'], default: 'scraper' }
+  source: { type: String, enum: ['api', 'scraper'], default: 'scraper' },
+  status: { type: String, enum: ['pending', 'completed'], default: 'completed' }
 });
 
 // Index to optimize lookups

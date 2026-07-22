@@ -3,7 +3,7 @@ import axios from 'axios';
 /**
  * Dispara uma execução do scraper de voos no GitHub Actions via repository_dispatch
  */
-export async function triggerGithubScraper(origin, destination, departureDate, returnDate = null) {
+export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null) {
   const token = process.env.GITHUB_PAT;
   const repo = process.env.GITHUB_REPO; // Format: "owner/repo"
 
@@ -14,17 +14,21 @@ export async function triggerGithubScraper(origin, destination, departureDate, r
 
   try {
     const url = `https://api.github.com/repos/${repo}/dispatches`;
-    console.log(`🌐 [GitHub Dispatch] Disparando Actions para: ${origin.toUpperCase()} ➔ ${destination.toUpperCase()} | Ida: ${departureDate} | Volta: ${returnDate || 'N/A'}`);
+    const depStr = departureDate || 'N/A';
+    const retStr = returnDate || 'N/A';
+    const origStr = origin ? origin.toUpperCase() : 'ALL';
+    const destStr = destination ? destination.toUpperCase() : 'ALL';
+    console.log(`🌐 [GitHub Dispatch] Disparando Actions para: ${origStr} ➔ ${destStr} | Ida: ${depStr} | Volta: ${retStr}`);
 
     await axios.post(
       url,
       {
         event_type: 'scrape-route',
         client_payload: {
-          origin: origin.toUpperCase(),
-          destination: destination.toUpperCase(),
-          departureDate,
-          returnDate
+          origin: origin ? origin.toUpperCase() : '',
+          destination: destination ? destination.toUpperCase() : '',
+          departureDate: departureDate || '',
+          returnDate: returnDate || ''
         }
       },
       {

@@ -41,8 +41,13 @@ jobs:
             DEST="${{ github.event.client_payload.destination }}"
             DEP_DATE="${{ github.event.client_payload.departureDate }}"
             RET_DATE="${{ github.event.client_payload.returnDate }}"
-            echo "Executing targeted scrape for: $ORIGIN ➔ $DEST (Ida: $DEP_DATE, Volta: $RET_DATE)"
-            node server/src/cron-scraper.js "$ORIGIN" "$DEST" "$DEP_DATE" "$RET_DATE"
+            if [ -n "$DEP_DATE" ]; then
+              echo "Executing targeted scrape for: $ORIGIN ➔ $DEST (Ida: $DEP_DATE, Volta: $RET_DATE)"
+              node server/src/cron-scraper.js "$ORIGIN" "$DEST" "$DEP_DATE" "$RET_DATE"
+            else
+              echo "Executing general scrape (reading alerts and pending caches)"
+              node server/src/cron-scraper.js
+            fi
           else
             echo "Executing full scrape cycle for all active alerts"
             node server/src/cron-scraper.js

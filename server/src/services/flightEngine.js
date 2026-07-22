@@ -4,6 +4,9 @@ import FlightCache from '../models/FlightCache.js';
 import { scrapeGoogleFlights } from './providers/googleFlightsScraper.js';
 import { triggerGithubScraper } from '../utils/githubDispatcher.js';
 
+// Cache em memória de rotas já disparadas para o GitHub Actions para evitar disparos duplicados
+const recentlyTriggered = new Set();
+
 // Lista de feriados nacionais do Brasil (2026 e 2027) para fins de emendas e finais de semana prolongados
 const HOLIDAYS = [
   // 2026
@@ -353,7 +356,7 @@ function triggerRevalidation(origin, destination, date) {
         if (flightsList && flightsList.length > 0) {
           await FlightCache.findOneAndUpdate(
             { origin, destination, departureDate: date, returnDate: null },
-            { flights: flightsList, scrapedAt: new Date(), source: 'scraper' },
+            { flights: flightsList, scrapedAt: new Date(), source: 'scraper', status: 'completed' },
             { upsert: true }
           );
           console.log(`[Background Revalidate] Cache local revalidado com sucesso!`);
@@ -404,15 +407,27 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
   });
 
   if (cached) {
-    const isFresh = cached.scrapedAt >= freshThreshold;
-    if (isFresh) {
-      console.log(`[Cache Hit] Perna fresca: ${originUpper}➔${destUpper} em ${date}`);
-      return cached.flights;
+    if (cached.status === 'pending') {
+      const isStalePending = new Date() - cached.scrapedAt > 5 * 60 * 1000; // 5 minutos
+      if (!isStalePending) {
+        console.log(`[Cache Pending] Raspagem já em andamento para ${originUpper}➔${destUpper} em ${date}`);
+        return {
+          status: 'scraping',
+          message: 'O robô está coletando passagens aéreas...'
+        };
+      }
+      console.log(`[Cache Pending Stale] Tentativa de raspagem anterior expirou. Reiniciando...`);
     } else {
-      console.log(`[Cache Stale] Perna expirada. Retornando cache e revalidando: ${originUpper}➔${destUpper} em ${date}`);
-      triggerRevalidation(originUpper, destUpper, date);
-      // Retorna marcando como dados históricos expirados
-      return cached.flights.map(f => ({ ...f, isStaleCache: true, cachedAt: cached.scrapedAt }));
+      const isFresh = cached.scrapedAt >= freshThreshold;
+      if (isFresh) {
+        console.log(`[Cache Hit] Perna fresca: ${originUpper}➔${destUpper} em ${date}`);
+        return cached.flights;
+      } else {
+        console.log(`[Cache Stale] Perna expirada. Retornando cache e revalidando: ${originUpper}➔${destUpper} em ${date}`);
+        triggerRevalidation(originUpper, destUpper, date);
+        // Retorna marcando como dados históricos expirados
+        return cached.flights.map(f => ({ ...f, isStaleCache: true, cachedAt: cached.scrapedAt }));
+      }
     }
   }
 
@@ -428,7 +443,7 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
       if (flightsList && flightsList.length > 0) {
         await FlightCache.findOneAndUpdate(
           { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
-          { flights: flightsList, scrapedAt: new Date(), source: 'scraper' },
+          { flights: flightsList, scrapedAt: new Date(), source: 'scraper', status: 'completed' },
           { upsert: true }
         );
         return flightsList;
@@ -451,7 +466,7 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
       if (liveOffers && liveOffers.length > 0) {
         await FlightCache.findOneAndUpdate(
           { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
-          { flights: liveOffers, scrapedAt: new Date(), source: 'api' },
+          { flights: liveOffers, scrapedAt: new Date(), source: 'api', status: 'completed' },
           { upsert: true }
         );
         return liveOffers;
@@ -462,9 +477,28 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
       return generateMockFlights(originUpper, destUpper, date, null);
     }
   } else {
-    // Modo Robô gratuito em produção: dispara a Actions do GitHub e avisa o frontend para fazer polling
-    console.log(`[GitHub Trigger] Agendando raspagem da perna no GitHub Actions...`);
-    await triggerGithubScraper(originUpper, destUpper, date);
+    // Modo Robô gratuito em produção: salva status 'pending' no banco para evitar loops de polling
+    console.log(`[GitHub Trigger] Criando registro pendente no cache para ${originUpper}➔${destUpper} em ${date}...`);
+    await FlightCache.findOneAndUpdate(
+      { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+      { flights: [], scrapedAt: new Date(), source: 'scraper', status: 'pending' },
+      { upsert: true }
+    );
+
+    // Dispara a Actions do GitHub de forma otimizada (apenas 1 vez por rota/minuto)
+    const triggerKey = `${originUpper}-${destUpper}`;
+    if (!recentlyTriggered.has(triggerKey)) {
+      recentlyTriggered.add(triggerKey);
+      setTimeout(() => recentlyTriggered.delete(triggerKey), 60000); // 1 minuto de debounce
+      
+      console.log(`[GitHub Trigger] Acionando pipeline do GitHub Actions para a rota ${originUpper}➔${destUpper}...`);
+      triggerGithubScraper(originUpper, destUpper).catch((err) => {
+        console.error('❌ Falha ao disparar GitHub Actions:', err.message);
+      });
+    } else {
+      console.log(`[GitHub Trigger] Pipeline já foi acionado recentemente para ${originUpper}➔${destUpper}. Ignorando disparo duplicado.`);
+    }
+
     return {
       status: 'scraping',
       message: 'Aguarde um momento. Nosso robô está coletando as passagens aéreas...'
@@ -506,7 +540,7 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
       if (liveOffers && liveOffers.length > 0) {
         await FlightCache.findOneAndUpdate(
           { origin: originUpper, destination: destUpper, departureDate, returnDate },
-          { flights: liveOffers, scrapedAt: new Date(), source: 'api' },
+          { flights: liveOffers, scrapedAt: new Date(), source: 'api', status: 'completed' },
           { upsert: true }
         );
         return liveOffers;

@@ -185,6 +185,18 @@ async function runScraperJob() {
         }
       }
     }
+
+    // Caso Extra: LER CACHES PENDENTES DO SISTEMA (Criados nos últimos 15 minutos pelas buscas dos usuários no Vercel)
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const pendingCaches = await FlightCache.find({
+      status: 'pending',
+      scrapedAt: { $gte: fifteenMinutesAgo }
+    }).lean();
+
+    log(`Encontrados ${pendingCaches.length} caches de busca pendentes para revalidação.`);
+    for (const cache of pendingCaches) {
+      queueTask(tasksMap, cache.origin, cache.destination, cache.departureDate);
+    }
   }
 
   const tasks = Array.from(tasksMap.values());
@@ -227,19 +239,36 @@ async function runScraperJob() {
           {
             origin: task.origin,
             destination: task.destination,
-            departureDate: task.departureDate
+            departureDate: task.departureDate,
+            returnDate: null
           },
           {
             flights: flightsList,
             scrapedAt: new Date(),
-            source: 'scraper'
+            source: 'scraper',
+            status: 'completed'
           },
           { upsert: true, new: true }
         );
         log(`-> Gravado/Atualizado com sucesso no MongoDB com ${flightsList.length} ofertas.`);
         successCount++;
       } else {
-        log(`-> ⚠️ Nenhum voo retornado pela raspagem.`);
+        log(`-> ⚠️ Nenhum voo retornado pela raspagem. Marcando como completed vazio.`);
+        await FlightCache.findOneAndUpdate(
+          {
+            origin: task.origin,
+            destination: task.destination,
+            departureDate: task.departureDate,
+            returnDate: null
+          },
+          {
+            flights: [],
+            scrapedAt: new Date(),
+            source: 'scraper',
+            status: 'completed'
+          },
+          { upsert: true }
+        );
         failureCount++;
       }
 
