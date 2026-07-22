@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import API from '../services/api';
 
 const AuthContext = createContext();
@@ -69,7 +70,13 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ user, token, googleClientId, loading, loginWithGoogle, loginDemo, logout }}>
-      {children}
+      {googleClientId ? (
+        <GoogleOAuthProvider clientId={googleClientId}>
+          {children}
+        </GoogleOAuthProvider>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }
