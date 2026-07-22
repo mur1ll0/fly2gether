@@ -83,8 +83,7 @@ export default function Navbar({ onOpenAlertsDrawer, alertsCount = 0 }) {
               {googleClientId ? (
                 <GoogleLogin
                   onSuccess={loginWithGoogle}
-                  onError={() => console.log('Login Google falhou')}
-                  useOneTap
+                  onError={(err) => console.log('Login Google falhou:', err)}
                   theme="filled_black"
                   shape="pill"
                   size="medium"

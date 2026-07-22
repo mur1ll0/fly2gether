@@ -18,15 +18,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Middleware para garantir que o banco está conectado antes de processar qualquer requisição
+// Middleware para verificar a conexão do banco sem bloquear requisições em caso de oscilação do MongoDB
 app.use(async (req, res, next) => {
   try {
     await connectDB();
-    next();
   } catch (err) {
-    console.error('❌ Falha de conexão com banco de dados:', err.message);
-    res.status(500).json({ error: 'Erro ao conectar ao banco de dados.' });
+    console.warn('⚠️ Aviso de banco de dados no middleware:', err.message);
   }
+  next();
 });
 
 // Rotas da API

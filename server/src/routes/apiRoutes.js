@@ -27,11 +27,11 @@ router.get('/flights/return-options', handleGetReturnFlights);
 router.get('/flights/booking-url', handleGetBookingUrl);
 router.get('/serpapi-usage', handleSerpApiUsage);
 
-// Alertas de Preço por E-mail
-router.post('/alerts', createAlert);
-router.get('/alerts', getUserAlerts);
-router.delete('/alerts/:id', deleteAlert);
-router.post('/alerts/check-now', async (req, res) => {
+// Alertas de Preço por E-mail (Exigem autenticação do usuário Google)
+router.post('/alerts', authenticateToken, createAlert);
+router.get('/alerts', authenticateToken, getUserAlerts);
+router.delete('/alerts/:id', authenticateToken, deleteAlert);
+router.post('/alerts/check-now', authenticateToken, async (req, res) => {
   await checkAlertsNow();
   res.json({ message: 'Varredura manual de alertas disparada!' });
 });

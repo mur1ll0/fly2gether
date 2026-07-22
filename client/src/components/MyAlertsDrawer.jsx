@@ -123,12 +123,32 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
                   key={item._id || item.id}
                   className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 transition-all flex justify-between items-start"
                 >
-                  <div className="space-y-1">
-                    <span className={`px-2 py-0.5 text-xs font-bold rounded-md uppercase ${
-                      item.mode === 'flytogether' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                    }`}>
-                      {item.mode === 'flytogether' ? 'Fly Together' : 'Voo Simples'}
-                    </span>
+                  <div className="space-y-1.5 flex-1 pr-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md uppercase ${
+                        item.mode === 'flytogether' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
+                      }`}>
+                        {item.mode === 'flytogether' ? 'Fly Together' : 'Voo Simples'}
+                      </span>
+
+                      {item.sortBy && (
+                        <span className="px-1.5 py-0.5 text-[10px] bg-slate-800 text-slate-300 rounded border border-slate-700 font-medium">
+                          📊 {item.sortBy === 'sincronia_total' ? 'Sincronia Total' : item.sortBy === 'tempo_juntos' ? 'Tempo Juntos' : item.sortBy === 'price' ? 'Menor Preço' : item.sortBy}
+                        </span>
+                      )}
+
+                      {item.stopsFilter && item.stopsFilter !== 'all' && (
+                        <span className="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-300 rounded border border-amber-500/20">
+                          {item.stopsFilter === 'direct' ? 'Direto' : 'Conexões'}
+                        </span>
+                      )}
+
+                      {item.hideTransfers && (
+                        <span className="px-1.5 py-0.5 text-[10px] bg-indigo-500/10 text-indigo-300 rounded border border-indigo-500/20">
+                          Sem traslado
+                        </span>
+                      )}
+                    </div>
 
                     <p className="text-sm font-bold text-slate-100 mt-1">
                       {item.mode === 'flytogether' ? (
@@ -141,7 +161,14 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
                     <p className="text-xs text-slate-400">
                       Teto máximo: <strong className="text-emerald-400">R$ {item.maxBudgetCombined}</strong>
                     </p>
-                    <p className="text-xs text-slate-500 flex items-center space-x-1">
+
+                    {item.selectedAirlines && item.selectedAirlines.length > 0 && (
+                      <p className="text-[11px] text-slate-500">
+                        Companhias: <span className="text-slate-400 font-mono">{item.selectedAirlines.join(', ')}</span>
+                      </p>
+                    )}
+
+                    <p className="text-xs text-slate-500 flex items-center space-x-1 pt-1">
                       <Mail className="w-3 h-3 text-slate-400" />
                       <span>{item.notifyEmail}</span>
                     </p>
@@ -159,9 +186,9 @@ export default function MyAlertsDrawer({ isOpen, onClose, alertsCount, onRefresh
             ) : (
               <div className="text-center py-12 text-slate-500 space-y-2">
                 <Bell className="w-10 h-10 mx-auto text-slate-700 stroke-1" />
-                <p className="text-sm font-medium">Nenhum alerta cadastrado ainda.</p>
+                <p className="text-sm font-medium">Nenhum alerta cadastrado na sua conta.</p>
                 <p className="text-xs text-slate-600">
-                  Ao pesquisar voos, clique no botão "Criar Alerta" para receber e-mails automáticos!
+                  Ao pesquisar voos, clique no botão "Criar Alerta" para salvar e receber e-mails automáticos com seus filtros!
                 </p>
               </div>
             )}

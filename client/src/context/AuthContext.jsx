@@ -7,14 +7,16 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('fly2gether_token') || '');
-  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientId, setGoogleClientId] = useState(import.meta.env.VITE_GOOGLE_CLIENT_ID || '');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Fetch Google Client ID configuration
     API.get('/config')
       .then(res => {
-        setGoogleClientId(res.data.googleClientId || '');
+        if (res.data.googleClientId) {
+          setGoogleClientId(res.data.googleClientId);
+        }
       })
       .catch(() => {});
 

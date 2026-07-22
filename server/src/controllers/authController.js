@@ -14,18 +14,26 @@ export async function googleLogin(req, res) {
     let email, googleId, name, picture;
 
     if (clientId) {
-      const client = new OAuth2Client(clientId);
-      const ticket = await client.verifyIdToken({
-        idToken,
-        audience: clientId,
-      });
-      const payload = ticket.getPayload();
-      googleId = payload.sub;
-      email = payload.email;
-      name = payload.name;
-      picture = payload.picture;
+      try {
+        const client = new OAuth2Client(clientId);
+        const ticket = await client.verifyIdToken({
+          idToken,
+          audience: clientId,
+        });
+        const payload = ticket.getPayload();
+        googleId = payload.sub;
+        email = payload.email;
+        name = payload.name;
+        picture = payload.picture;
+      } catch (verifyErr) {
+        console.error('❌ Erro na validação do idToken no Google OAuth2Client:', verifyErr.message);
+        return res.status(401).json({
+          error: `Falha na validação do token do Google (${verifyErr.message}). Verifique se o GOOGLE_CLIENT_ID no .env é o mesmo configurado no Google Cloud Console.`
+        });
+      }
     } else {
-      // Fallback for development without configured GOOGLE_CLIENT_ID
+      // Fallback para desenvolvimento sem GOOGLE_CLIENT_ID configurado no .env
+      console.warn('⚠️ GOOGLE_CLIENT_ID não configurado. Decodificando token localmente...');
       const decoded = jwt.decode(idToken) || {};
       googleId = decoded.sub || 'demo-google-id-' + Date.now();
       email = decoded.email || 'usuario.demo@fly2gether.com';
@@ -46,8 +54,8 @@ export async function googleLogin(req, res) {
         await user.save();
       }
     } catch (dbErr) {
-      console.warn('⚠️ Mongoose indisponível, usando objeto temporário de usuário:', dbErr.message);
-      user = { _id: 'demo-user-id', googleId, email, name, picture };
+      console.warn('⚠️ Mongoose indisponível ou erro no salvar do banco, usando objeto em memória:', dbErr.message);
+      user = { _id: 'user-' + (googleId || Date.now()), googleId, email, name, picture };
     }
 
     const token = jwt.sign(
@@ -56,7 +64,7 @@ export async function googleLogin(req, res) {
       { expiresIn: '7d' }
     );
 
-    res.json({
+    return res.json({
       token,
       user: {
         id: user._id,
@@ -66,8 +74,8 @@ export async function googleLogin(req, res) {
       }
     });
   } catch (error) {
-    console.error('Erro na autenticação Google:', error.message);
-    res.status(401).json({ error: 'Falha na validação das credenciais do Google.' });
+    console.error('❌ Erro inesperado no controller de autenticação Google:', error.stack || error.message);
+    return res.status(500).json({ error: 'Erro interno ao autenticar com o Google: ' + error.message });
   }
 }
 

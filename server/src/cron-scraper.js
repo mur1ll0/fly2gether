@@ -152,8 +152,15 @@ async function runScraperJob() {
       for (const orig of origins) {
         if (!orig || !dest) continue;
 
-        // Se o alerta tiver datas específicas fixas
-        if (alert.vacationStart && !alert.isVacation && !alert.onlyWeekends) {
+        // Se o alerta tiver datas específicas de viagem
+        if (alert.departureDate) {
+          queueTask(tasksMap, orig, dest, alert.departureDate);
+          if (alert.returnDate) {
+            queueTask(tasksMap, dest, orig, alert.returnDate);
+          }
+        }
+        // Se o alerta tiver datas específicas de férias não-flexíveis
+        else if (alert.vacationStart && !alert.isVacation && !alert.onlyWeekends) {
           queueTask(tasksMap, orig, dest, alert.vacationStart);
           if (alert.vacationEnd) {
             queueTask(tasksMap, dest, orig, alert.vacationEnd);

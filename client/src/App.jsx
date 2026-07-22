@@ -10,8 +10,11 @@ import CombinedFlightCard from './components/CombinedFlightCard';
 import CreateAlertModal from './components/CreateAlertModal';
 import MyAlertsDrawer from './components/MyAlertsDrawer';
 import API from './services/api';
+import { useAuth } from './context/AuthContext';
 
 export default function App() {
+  const { user } = useAuth();
+
   // Search Mode: 'normal' vs 'flytogether'
   const [searchMode, setSearchMode] = useState('flytogether');
 
@@ -84,14 +87,21 @@ export default function App() {
     } catch (e) {
       console.error('Erro ao restaurar última pesquisa:', e);
     }
-    fetchAlertsCount();
     fetchSerpApiUsage();
   }, []);
 
+  useEffect(() => {
+    fetchAlertsCount();
+  }, [user]);
+
   const fetchAlertsCount = () => {
+    if (!user) {
+      setAlertsCount(0);
+      return;
+    }
     API.get('/alerts')
       .then(res => setAlertsCount(res.data?.length || 0))
-      .catch(() => {});
+      .catch(() => setAlertsCount(0));
   };
 
   const fetchSerpApiUsage = () => {
@@ -265,8 +275,56 @@ export default function App() {
   };
 
   const handleOpenCreateAlert = (flightOrCombined) => {
-    setActiveAlertTarget(flightOrCombined);
+    if (!user) {
+      Swal.fire({
+        title: 'Login Necessário',
+        text: 'Para criar alertas de preço sincronizados entre todos os seus dispositivos, faça login com sua conta do Google.',
+        icon: 'info',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#0066ff',
+        confirmButtonText: 'Entendido'
+      });
+      return;
+    }
+
+    const searchState = {
+      searchMode,
+      origin1,
+      origin2,
+      destination,
+      departureDate,
+      returnDate,
+      onlyWeekends,
+      isVacation,
+      vacationStart,
+      vacationEnd,
+      durationDays,
+      sortBy,
+      selectedAirlines,
+      stopsFilter,
+      hideTransfers,
+      toleranceIndex
+    };
+
+    setActiveAlertTarget({ flightOrCombined, searchState });
     setIsAlertModalOpen(true);
+  };
+
+  const handleOpenAlertsDrawer = () => {
+    if (!user) {
+      Swal.fire({
+        title: 'Login Necessário',
+        text: 'Faça login com sua conta do Google para visualizar e gerenciar seus alertas de preço.',
+        icon: 'info',
+        background: '#0f172a',
+        color: '#f8fafc',
+        confirmButtonColor: '#0066ff',
+        confirmButtonText: 'Entendido'
+      });
+      return;
+    }
+    setIsDrawerOpen(true);
   };
 
   // Checar se há resultados provenientes de cache expirado (SWR em revalidação)
@@ -440,7 +498,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[#070b14] text-slate-100 font-sans selection:bg-brand-500 selection:text-white">
       {/* Navbar */}
       <Navbar
-        onOpenAlertsDrawer={() => setIsDrawerOpen(true)}
+        onOpenAlertsDrawer={handleOpenAlertsDrawer}
         alertsCount={alertsCount}
       />
 
