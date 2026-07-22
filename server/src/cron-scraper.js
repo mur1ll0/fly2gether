@@ -211,13 +211,14 @@ async function runScraperJob() {
     log(`[Progresso ${i+1}/${tasks.length}] Processando: ${task.origin} ➔ ${task.destination} em ${task.departureDate}`);
 
     try {
-      // 1. Checa se o cache no banco de dados já possui registro recente (< 24h)
+      // 1. Checa se o cache no banco de dados já possui registro recente (< 24h) e concluído
       const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const existingCache = await FlightCache.findOne({
         origin: task.origin,
         destination: task.destination,
         departureDate: task.departureDate,
-        scrapedAt: { $gte: freshThreshold }
+        scrapedAt: { $gte: freshThreshold },
+        status: 'completed'
       });
 
       if (existingCache) {
