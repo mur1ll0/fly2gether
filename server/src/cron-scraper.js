@@ -278,6 +278,26 @@ async function runScraperJob() {
 
     } catch (taskErr) {
       log(`-> ❌ Falha ao processar tarefa: ${taskErr.message}`);
+      try {
+        await FlightCache.findOneAndUpdate(
+          {
+            origin: task.origin,
+            destination: task.destination,
+            departureDate: task.departureDate,
+            returnDate: null
+          },
+          {
+            flights: [],
+            scrapedAt: new Date(),
+            source: 'scraper',
+            status: 'completed'
+          },
+          { upsert: true }
+        );
+        log(`-> Marcado como completed vazio após falha.`);
+      } catch (dbErr) {
+        log(`-> Erro ao salvar falha no MongoDB: ${dbErr.message}`);
+      }
       failureCount++;
     }
   }
