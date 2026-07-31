@@ -1,7 +1,9 @@
 import React from 'react';
 import { Calendar, Sun, Palmtree, Clock, Sparkles } from 'lucide-react';
+import SmartDatePreview from './SmartDatePreview';
 
 export default function SmartExtensionsToggle({
+  departureDate,
   onlyWeekends,
   setOnlyWeekends,
   isVacation,
@@ -119,6 +121,17 @@ export default function SmartExtensionsToggle({
             </select>
           </div>
         </div>
+      )}
+
+      {/* Preview de combinações quando nenhuma data fixa de ida é informada */}
+      {!departureDate && (
+        <SmartDatePreview
+          onlyWeekends={onlyWeekends}
+          isVacation={isVacation}
+          vacationStart={vacationStart}
+          vacationEnd={vacationEnd}
+          durationDays={durationDays}
+        />
       )}
     </div>
   );

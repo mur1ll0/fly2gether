@@ -70,8 +70,14 @@ function isWeekend(dateStr) {
 function generateWeekendCandidateDates() {
   const candidates = [];
   const today = new Date();
-  
-  // Próximos 12 meses
+  const todayStr = today.toISOString().split('T')[0];
+
+  // Limite de 60 dias (2 meses) para fins de semana normais sem feriado
+  const twoMonthsAhead = new Date(today);
+  twoMonthsAhead.setDate(today.getDate() + 60);
+  const maxNormalDateStr = twoMonthsAhead.toISOString().split('T')[0];
+
+  // Varre os próximos 365 dias para identificar feriados e fins de semana
   for (let i = 0; i < 365; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
@@ -80,21 +86,60 @@ function generateWeekendCandidateDates() {
     const holiday = getHolidayOnDate(dateStr);
     const dayOfWeek = d.getUTCDay(); // 0: Dom, 1: Seg, 2: Ter, 3: Qua, 4: Qui, 5: Sex, 6: Sáb
 
-    // Caso 1: Feriado na Quinta-feira (Emenda na Sexta-feira)
-    if (holiday && dayOfWeek === 4) {
-      const fri = new Date(d); fri.setDate(d.getDate() + 1);
-      const sat = new Date(d); sat.setDate(d.getDate() + 2);
-      const sun = new Date(d); sun.setDate(d.getDate() + 3);
-      
+    // 1. Caso Feriado na Segunda-feira (ex: 7/Set, 12/Out, 02/Nov)
+    if (holiday && dayOfWeek === 1) {
+      const friPrev = new Date(d); friPrev.setDate(d.getDate() - 3);
+      const satPrev = new Date(d); satPrev.setDate(d.getDate() - 2);
+
+      // Opção A: Ida na Sexta à noite ➔ Volta na Segunda (feriado)
       candidates.push({
-        departureDate: dateStr, // Partida no feriado (Quinta)
-        returnDate: sun.toISOString().split('T')[0], // Retorno no Domingo
+        departureDate: friPrev.toISOString().split('T')[0],
+        returnDate: dateStr,
+        isWeekendOrHoliday: true,
+        holidayDetails: holiday
+      });
+      // Opção B: Ida no Sábado ➔ Volta na Segunda (feriado)
+      candidates.push({
+        departureDate: satPrev.toISOString().split('T')[0],
+        returnDate: dateStr,
         isWeekendOrHoliday: true,
         holidayDetails: holiday
       });
     }
 
-    // Caso 2: Feriado na Terça-feira (Emenda na Segunda-feira)
+    // 2. Caso Feriado na Sexta-feira (ex: 20/Nov, 25/Dez)
+    if (holiday && dayOfWeek === 5) {
+      const thuPrev = new Date(d); thuPrev.setDate(d.getDate() - 1);
+      const sunNext = new Date(d); sunNext.setDate(d.getDate() + 2);
+
+      // Opção A: Ida na Quinta à noite ➔ Volta no Domingo
+      candidates.push({
+        departureDate: thuPrev.toISOString().split('T')[0],
+        returnDate: sunNext.toISOString().split('T')[0],
+        isWeekendOrHoliday: true,
+        holidayDetails: holiday
+      });
+      // Opção B: Ida na Sexta (feriado) ➔ Volta no Domingo
+      candidates.push({
+        departureDate: dateStr,
+        returnDate: sunNext.toISOString().split('T')[0],
+        isWeekendOrHoliday: true,
+        holidayDetails: holiday
+      });
+    }
+
+    // 3. Caso Feriado na Quinta-feira (Emenda na Sexta-feira, ex: Corpus Christi)
+    if (holiday && dayOfWeek === 4) {
+      const sunNext = new Date(d); sunNext.setDate(d.getDate() + 3);
+      candidates.push({
+        departureDate: dateStr, // Partida no feriado (Quinta)
+        returnDate: sunNext.toISOString().split('T')[0], // Retorno no Domingo
+        isWeekendOrHoliday: true,
+        holidayDetails: holiday
+      });
+    }
+
+    // 4. Caso Feriado na Terça-feira (Emenda na Segunda-feira)
     if (holiday && dayOfWeek === 2) {
       const satPrev = new Date(d); satPrev.setDate(d.getDate() - 3);
       candidates.push({
@@ -105,38 +150,15 @@ function generateWeekendCandidateDates() {
       });
     }
 
-    // Caso 3: Feriado na Sexta-feira ou Segunda-feira (Fim de semana prolongado)
-    if (holiday && (dayOfWeek === 1 || dayOfWeek === 5)) {
-      const dep = dayOfWeek === 5 ? dateStr : new Date(d).setDate(d.getDate() - 2);
-      const ret = dayOfWeek === 1 ? dateStr : new Date(d).setDate(d.getDate() + 2);
-      
-      const depStr = typeof dep === 'string' ? dep : new Date(dep).toISOString().split('T')[0];
-      const retStr = typeof ret === 'string' ? ret : new Date(ret).toISOString().split('T')[0];
-
-      candidates.push({
-        departureDate: depStr,
-        returnDate: retStr,
-        isWeekendOrHoliday: true,
-        holidayDetails: holiday
-      });
-    }
-
-    // Caso 4: Fim de semana padrão (Partida na Sexta/Sábado e Retorno no Domingo/Segunda)
-    if (dayOfWeek === 5) { // Sexta
+    // 5. Finais de Semana Padrão (Sem Feriado): Apenas para os PRÓXIMOS 2 MESES (60 dias)
+    if (dayOfWeek === 5 && dateStr <= maxNormalDateStr && !holiday) { // Sexta-feira sem feriado
       const sat = new Date(d); sat.setDate(d.getDate() + 1);
       const sun = new Date(d); sun.setDate(d.getDate() + 2);
-      const mon = new Date(d); mon.setDate(d.getDate() + 3);
 
+      // Sexta ➔ Domingo
       candidates.push({
-        departureDate: dateStr, // Partida na Sexta
-        returnDate: sun.toISOString().split('T')[0], // Retorno no Domingo
-        isWeekendOrHoliday: true,
-        holidayDetails: null
-      });
-
-      candidates.push({
-        departureDate: sat.toISOString().split('T')[0], // Partida no Sábado
-        returnDate: mon.toISOString().split('T')[0], // Retorno na Segunda
+        departureDate: dateStr,
+        returnDate: sun.toISOString().split('T')[0],
         isWeekendOrHoliday: true,
         holidayDetails: null
       });
@@ -146,7 +168,6 @@ function generateWeekendCandidateDates() {
   // Filtrar apenas candidatos futuros e remover duplicatas ordenando cronologicamente
   const unique = [];
   const seen = new Set();
-  const todayStr = today.toISOString().split('T')[0];
 
   for (const c of candidates) {
     const key = `${c.departureDate}_${c.returnDate}`;
@@ -396,7 +417,7 @@ function revalidateLiveSearch(origin, destination, departureDate, returnDate) {
 async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
 
   // 1. Tentar encontrar no Cache do MongoDB
   const cached = await FlightCache.findOne({
@@ -413,7 +434,9 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
         console.log(`[Cache Pending] Raspagem já em andamento para ${originUpper}➔${destUpper} em ${date}`);
         return {
           status: 'scraping',
-          message: 'O robô está coletando passagens aéreas...'
+          message: 'O robô está coletando passagens aéreas...',
+          completedCount: 0,
+          totalCount: 1
         };
       }
       console.log(`[Cache Pending Stale] Tentativa de raspagem anterior expirou. Reiniciando...`);
@@ -501,7 +524,9 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
 
     return {
       status: 'scraping',
-      message: 'Aguarde um momento. Nosso robô está coletando as passagens aéreas...'
+      message: 'Aguarde um momento. Nosso robô está coletando as passagens aéreas...',
+      completedCount: 0,
+      totalCount: 1
     };
   }
 }
@@ -510,7 +535,7 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
 async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi }) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
 
   // Caso 1: Modo API Paga (Tratamento unificado com cache)
   if (returnDate && useLiveApi) {

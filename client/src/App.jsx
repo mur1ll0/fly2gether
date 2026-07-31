@@ -11,6 +11,7 @@ import CreateAlertModal from './components/CreateAlertModal';
 import MyAlertsDrawer from './components/MyAlertsDrawer';
 import API from './services/api';
 import { useAuth } from './context/AuthContext';
+import ScraperProgress from './components/ScraperProgress';
 
 export default function App() {
   const { user } = useAuth();
@@ -57,6 +58,7 @@ export default function App() {
   const [serpApiUsage, setSerpApiUsage] = useState(null);
   const [useLiveApi, setUseLiveApi] = useState(false);
   const [scrapingMessage, setScrapingMessage] = useState('');
+  const [scrapingProgress, setScrapingProgress] = useState({ completed: 0, total: 0 });
 
   const abortControllerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
@@ -124,6 +126,7 @@ export default function App() {
           console.log('✅ [Polling] Coleta concluída com sucesso!');
           setResults(Array.isArray(res.data?.results) ? res.data.results : []);
           setScrapingMessage('');
+          setScrapingProgress({ completed: 0, total: 0 });
           setLoading(false);
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
@@ -132,6 +135,12 @@ export default function App() {
           fetchSerpApiUsage();
         } else {
           setScrapingMessage(res.data.message || 'Nosso robô está minerando tarifas...');
+          if (res.data.totalCount !== undefined) {
+            setScrapingProgress({
+              completed: res.data.completedCount || 0,
+              total: res.data.totalCount || 0
+            });
+          }
         }
       } catch (err) {
         console.error('❌ [Polling] Erro no polling de busca:', err);
@@ -232,10 +241,17 @@ export default function App() {
 
       if (res.data?.status === 'scraping') {
         setScrapingMessage(res.data.message || 'Nosso robô iniciou a busca no Google Flights...');
+        if (res.data.totalCount !== undefined) {
+          setScrapingProgress({
+            completed: res.data.completedCount || 0,
+            total: res.data.totalCount || 0
+          });
+        }
         startPollingSearch(params);
       } else {
         setResults(Array.isArray(res.data?.results) ? res.data.results : []);
         setScrapingMessage('');
+        setScrapingProgress({ completed: 0, total: 0 });
         setLoading(false);
         fetchSerpApiUsage(); // Atualiza cota de buscas após realizar a pesquisa
       }
@@ -260,6 +276,7 @@ export default function App() {
       pollingIntervalRef.current = null;
     }
     setScrapingMessage('');
+    setScrapingProgress({ completed: 0, total: 0 });
     setLoading(false);
     Swal.fire({
       title: 'Busca Cancelada',
@@ -631,6 +648,7 @@ export default function App() {
 
             {/* Global Smart Extensions Component */}
             <SmartExtensionsToggle
+              departureDate={departureDate}
               onlyWeekends={onlyWeekends}
               setOnlyWeekends={setOnlyWeekends}
               isVacation={isVacation}
@@ -771,17 +789,12 @@ export default function App() {
 
           {/* Render Results List */}
           {loading ? (
-            <div className="glass-panel p-12 text-center rounded-3xl border border-slate-800 space-y-4 bg-slate-900/40">
-              <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-              <h3 className="text-lg font-bold text-slate-200">
-                {scrapingMessage || 'Consultando as melhores opções no Google Flights...'}
-              </h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {scrapingMessage 
-                  ? 'Nosso robô está vasculhando a web para colher tarifas, aeronaves e conexões detalhadas (isso pode levar cerca de 1 minuto na primeira busca).' 
-                  : 'Consultando companhias aéreas e tarifas promocionais diretamente na API.'}
-              </p>
-            </div>
+            <ScraperProgress
+              scrapingMessage={scrapingMessage}
+              completedCount={scrapingProgress.completed}
+              totalCount={scrapingProgress.total}
+              onCancel={handleCancelSearch}
+            />
           ) : filteredAndSortedResults.length > 0 ? (
             <div className="space-y-6">
               <div className="space-y-4">

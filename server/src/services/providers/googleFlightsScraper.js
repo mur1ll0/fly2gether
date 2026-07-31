@@ -87,7 +87,13 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate }
 
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--no-first-run',
+      '--disable-features=FirstPartySets'
+    ]
   });
 
   try {
@@ -218,7 +224,13 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate }
     throw error;
   } finally {
     log(`Fechando navegador Puppeteer.`);
-    await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        log(`⚠️ Aviso ao fechar navegador (limpeza de perfis temporários): ${closeErr.message}`);
+      }
+    }
   }
 }
 

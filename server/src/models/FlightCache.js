@@ -13,5 +13,7 @@ const FlightCacheSchema = new mongoose.Schema({
 
 // Index to optimize lookups
 FlightCacheSchema.index({ origin: 1, destination: 1, departureDate: 1, returnDate: 1 });
+// TTL index: automaticamente expira e exclui registros após 12 horas (43200 segundos)
+FlightCacheSchema.index({ scrapedAt: 1 }, { expireAfterSeconds: 43200 });
 
 export default mongoose.models.FlightCache || mongoose.model('FlightCache', FlightCacheSchema);
