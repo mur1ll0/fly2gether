@@ -15,7 +15,6 @@ concurrency:
 
 jobs:
   scrape:
-    if: false # DESATIVADO TEMPORARIAMENTE PARA CANCELAR E LIMPAR A FILA DE EXECUÇÕES DO GITHUB
     runs-on: ubuntu-latest
     
     steps:
