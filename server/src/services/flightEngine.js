@@ -494,8 +494,6 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
         const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
         if (isLocal) {
           triggerLocalScrape(originUpper, destUpper, date);
-        } else if (!useLiveApi) {
-          triggerGithubScraper(originUpper, destUpper, date).catch(() => {});
         }
 
         return {
