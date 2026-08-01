@@ -296,8 +296,23 @@ function parseFlightText(baseText, expandedText, searchOrigin, searchDestination
   });
 
   // 7. Detectar Transferência de Aeroporto (Traslado)
-  const hasAirportTransfer = expandedText.toLowerCase().includes('troca de aeroporto') || 
-                             expandedText.toLowerCase().includes('altere o aeroporto');
+  const lowerExp = expandedText.toLowerCase();
+  const hasTransferKeyword = lowerExp.includes('troca de aeroporto') || 
+                             lowerExp.includes('altere o aeroporto') ||
+                             lowerExp.includes('traslado') ||
+                             lowerExp.includes('trocar de aeroporto') ||
+                             lowerExp.includes('muda de aeroporto') ||
+                             lowerExp.includes('mudança de aeroporto') ||
+                             lowerExp.includes('mudanca de aeroporto');
+
+  const hasMultiSP = (connectIatas.includes('GRU') && connectIatas.includes('CGH')) ||
+                     (connectIatas.includes('VCP') && connectIatas.includes('GRU')) ||
+                     (connectIatas.includes('VCP') && connectIatas.includes('CGH'));
+
+  const hasMultiRIO = (connectIatas.includes('SDU') && connectIatas.includes('GIG'));
+  const hasMultiNYC = (connectIatas.includes('EWR') && (connectIatas.includes('JFK') || connectIatas.includes('LGA')));
+
+  const hasAirportTransfer = hasTransferKeyword || hasMultiSP || hasMultiRIO || hasMultiNYC;
 
   // 8. Extrair Linhas Aéreas, Números de Voo e Aeronaves do texto expandido
   const lines = expandedText.split('\n');

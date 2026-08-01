@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Clock, Flame, Calendar, Bell, ArrowRight, Sparkles, CheckCircle2, Plane } from 'lucide-react';
+import { Users, Clock, Flame, Calendar, Bell, ArrowRight, Sparkles, CheckCircle2, Plane, Bus } from 'lucide-react';
 import { formatToBrazillianDate } from '../utils/dateFormatter';
 
 export default function CombinedFlightCard({ combined, onCreateAlert }) {
@@ -52,6 +52,13 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
             <span className="px-2.5 py-1 text-xs font-bold bg-amber-400/10 text-amber-300 border border-amber-400/30 rounded-lg flex items-center space-x-1">
               <Calendar className="w-3.5 h-3.5 text-amber-400" />
               <span>{holidayDetails ? holidayDetails.name : 'Viagem de Fim de Semana'}</span>
+            </span>
+          )}
+
+          {(person1.hasAirportTransfer || person1.returnHasAirportTransfer || person2.hasAirportTransfer || person2.returnHasAirportTransfer) && (
+            <span className="px-2.5 py-1 text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-lg flex items-center space-x-1 animate-pulse" title="Existe ao menos um voo com troca de aeroporto e traslado terrestre">
+              <Bus className="w-3.5 h-3.5 text-amber-400" />
+              <span>Traslado Terrestre Necessário</span>
             </span>
           )}
         </div>
@@ -114,18 +121,27 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                 <div className="flex-1 flex flex-col items-center relative py-1">
                   <div className="w-full flex items-center relative h-3">
-                    <div className="h-[1.5px] w-full bg-slate-700 rounded-full absolute top-1/2 transform -translate-y-1/2"></div>
+                    <div className={`h-[1.5px] w-full rounded-full absolute top-1/2 transform -translate-y-1/2 ${person1.hasAirportTransfer ? 'bg-gradient-to-r from-slate-700 via-amber-500 to-slate-700' : 'bg-slate-700'}`}></div>
                     
                     {!isP1OutboundDirect && Array.isArray(person1.stopsList) && person1.stopsList.map((stop, sIdx, arr) => {
                       const percentage = ((sIdx + 1) / (arr.length + 1)) * 100;
+                      const isTransfer = person1.hasAirportTransfer;
                       return (
                         <div 
                           key={sIdx} 
                           style={{ left: `${percentage}%` }} 
                           className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 z-10"
-                          title={`Conexão Ida: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
+                          title={isTransfer 
+                            ? `🚌 Traslado Terrestre (Troca de Aeroporto)\nConexão: ${stop.city} (${stop.iata})\nAeroporto: ${stop.name}\nRequer transporte por conta própria entre aeroportos.`
+                            : `Conexão Ida: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
                         >
-                          <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                          {isTransfer ? (
+                            <div className="p-0.5 rounded-full bg-amber-500 border border-slate-950 shadow text-slate-950 flex items-center justify-center transition-transform hover:scale-125 animate-pulse">
+                              <Bus className="w-2.5 h-2.5 stroke-[2.5]" />
+                            </div>
+                          ) : (
+                            <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                          )}
                         </div>
                       );
                     })}
@@ -166,18 +182,27 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                   <div className="flex-1 flex flex-col items-center relative py-1">
                     <div className="w-full flex items-center relative h-3">
-                      <div className="h-[1.5px] w-full bg-slate-700 rounded-full absolute top-1/2 transform -translate-y-1/2"></div>
+                      <div className={`h-[1.5px] w-full rounded-full absolute top-1/2 transform -translate-y-1/2 ${person1.returnHasAirportTransfer ? 'bg-gradient-to-r from-slate-700 via-amber-500 to-slate-700' : 'bg-slate-700'}`}></div>
                       
                       {!isP1InboundDirect && Array.isArray(person1.returnStopsList) && person1.returnStopsList.map((stop, sIdx, arr) => {
                         const percentage = ((sIdx + 1) / (arr.length + 1)) * 100;
+                        const isTransfer = person1.returnHasAirportTransfer;
                         return (
                           <div 
                             key={sIdx} 
                             style={{ left: `${percentage}%` }} 
                             className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 z-10"
-                            title={`Conexão Volta: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
+                            title={isTransfer 
+                              ? `🚌 Traslado Terrestre (Troca de Aeroporto)\nConexão: ${stop.city} (${stop.iata})\nAeroporto: ${stop.name}\nRequer transporte por conta própria entre aeroportos.`
+                              : `Conexão Volta: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
                           >
-                            <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                            {isTransfer ? (
+                              <div className="p-0.5 rounded-full bg-amber-500 border border-slate-950 shadow text-slate-950 flex items-center justify-center transition-transform hover:scale-125 animate-pulse">
+                                <Bus className="w-2.5 h-2.5 stroke-[2.5]" />
+                              </div>
+                            ) : (
+                              <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                            )}
                           </div>
                         );
                       })}
@@ -253,18 +278,27 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                 <div className="flex-1 flex flex-col items-center relative py-1">
                   <div className="w-full flex items-center relative h-3">
-                    <div className="h-[1.5px] w-full bg-slate-700 rounded-full absolute top-1/2 transform -translate-y-1/2"></div>
+                    <div className={`h-[1.5px] w-full rounded-full absolute top-1/2 transform -translate-y-1/2 ${person2.hasAirportTransfer ? 'bg-gradient-to-r from-slate-700 via-amber-500 to-slate-700' : 'bg-slate-700'}`}></div>
                     
                     {!isP2OutboundDirect && Array.isArray(person2.stopsList) && person2.stopsList.map((stop, sIdx, arr) => {
                       const percentage = ((sIdx + 1) / (arr.length + 1)) * 100;
+                      const isTransfer = person2.hasAirportTransfer;
                       return (
                         <div 
                           key={sIdx} 
                           style={{ left: `${percentage}%` }} 
                           className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 z-10"
-                          title={`Conexão Ida: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
+                          title={isTransfer 
+                            ? `🚌 Traslado Terrestre (Troca de Aeroporto)\nConexão: ${stop.city} (${stop.iata})\nAeroporto: ${stop.name}\nRequer transporte por conta própria entre aeroportos.`
+                            : `Conexão Ida: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
                         >
-                          <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                          {isTransfer ? (
+                            <div className="p-0.5 rounded-full bg-amber-500 border border-slate-950 shadow text-slate-950 flex items-center justify-center transition-transform hover:scale-125 animate-pulse">
+                              <Bus className="w-2.5 h-2.5 stroke-[2.5]" />
+                            </div>
+                          ) : (
+                            <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                          )}
                         </div>
                       );
                     })}
@@ -305,18 +339,27 @@ export default function CombinedFlightCard({ combined, onCreateAlert }) {
 
                   <div className="flex-1 flex flex-col items-center relative py-1">
                     <div className="w-full flex items-center relative h-3">
-                      <div className="h-[1.5px] w-full bg-slate-700 rounded-full absolute top-1/2 transform -translate-y-1/2"></div>
+                      <div className={`h-[1.5px] w-full rounded-full absolute top-1/2 transform -translate-y-1/2 ${person2.returnHasAirportTransfer ? 'bg-gradient-to-r from-slate-700 via-amber-500 to-slate-700' : 'bg-slate-700'}`}></div>
                       
                       {!isP2InboundDirect && Array.isArray(person2.returnStopsList) && person2.returnStopsList.map((stop, sIdx, arr) => {
                         const percentage = ((sIdx + 1) / (arr.length + 1)) * 100;
+                        const isTransfer = person2.returnHasAirportTransfer;
                         return (
                           <div 
                             key={sIdx} 
                             style={{ left: `${percentage}%` }} 
                             className="absolute top-1/2 transform -translate-y-1/2 -translate-x-1/2 z-10"
-                            title={`Conexão Volta: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
+                            title={isTransfer 
+                              ? `🚌 Traslado Terrestre (Troca de Aeroporto)\nConexão: ${stop.city} (${stop.iata})\nAeroporto: ${stop.name}\nRequer transporte por conta própria entre aeroportos.`
+                              : `Conexão Volta: ${stop.city} (${stop.iata}) \nAeroporto: ${stop.name}`}
                           >
-                            <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                            {isTransfer ? (
+                              <div className="p-0.5 rounded-full bg-amber-500 border border-slate-950 shadow text-slate-950 flex items-center justify-center transition-transform hover:scale-125 animate-pulse">
+                                <Bus className="w-2.5 h-2.5 stroke-[2.5]" />
+                              </div>
+                            ) : (
+                              <div className="w-2 h-2 rounded-full bg-amber-400 border border-slate-950 shadow cursor-help transition-transform hover:scale-125"></div>
+                            )}
                           </div>
                         );
                       })}
