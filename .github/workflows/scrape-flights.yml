@@ -9,6 +9,10 @@ on:
       - scrape-all
       - scrape-route
 
+concurrency:
+  group: scraper-${{ github.event.client_payload.origin || 'all' }}-${{ github.event.client_payload.destination || 'all' }}-${{ github.event.client_payload.departureDate || 'all' }}
+  cancel-in-progress: true
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
