@@ -1,37 +1,61 @@
 import React, { useMemo } from 'react';
 import { Calendar, Palmtree, Sparkles, ArrowRight, Info, Flame } from 'lucide-react';
 
-const HOLIDAYS = [
-  { date: '2026-01-01', name: 'Ano Novo' },
-  { date: '2026-02-16', name: 'Carnaval (Segunda)' },
-  { date: '2026-02-17', name: 'Carnaval (Terça)' },
-  { date: '2026-04-03', name: 'Sexta-feira Santa' },
-  { date: '2026-04-21', name: 'Tiradentes' },
-  { date: '2026-05-01', name: 'Dia do Trabalho' },
-  { date: '2026-06-04', name: 'Corpus Christi' },
-  { date: '2026-09-07', name: 'Independência do Brasil' },
-  { date: '2026-10-12', name: 'Nossa Senhora Aparecida' },
-  { date: '2026-11-02', name: 'Finados' },
-  { date: '2026-11-15', name: 'Proclamação da República' },
-  { date: '2026-11-20', name: 'Dia da Consciência Negra' },
-  { date: '2026-12-25', name: 'Natal' },
-  { date: '2027-01-01', name: 'Ano Novo' },
-  { date: '2027-02-08', name: 'Carnaval (Segunda)' },
-  { date: '2027-02-09', name: 'Carnaval (Terça)' },
-  { date: '2027-03-26', name: 'Sexta-feira Santa' },
-  { date: '2027-04-21', name: 'Tiradentes' },
-  { date: '2027-05-01', name: 'Dia do Trabalho' },
-  { date: '2027-05-27', name: 'Corpus Christi' },
-  { date: '2027-09-07', name: 'Independência do Brasil' },
-  { date: '2027-10-12', name: 'Nossa Senhora Aparecida' },
-  { date: '2027-11-02', name: 'Finados' },
-  { date: '2027-11-15', name: 'Proclamação da República' },
-  { date: '2027-11-20', name: 'Dia da Consciência Negra' },
-  { date: '2027-12-25', name: 'Natal' }
-];
+function getEasterDate(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function formatDateStr(date) {
+  return date.toISOString().split('T')[0];
+}
+
+function getBrazilianHolidays(startYear = new Date().getFullYear(), endYear = new Date().getFullYear() + 2) {
+  const holidays = [];
+  for (let y = startYear; y <= endYear; y++) {
+    holidays.push({ date: `${y}-01-01`, name: 'Ano Novo' });
+    holidays.push({ date: `${y}-04-21`, name: 'Tiradentes' });
+    holidays.push({ date: `${y}-05-01`, name: 'Dia do Trabalho' });
+    holidays.push({ date: `${y}-09-07`, name: 'Independência do Brasil' });
+    holidays.push({ date: `${y}-10-12`, name: 'Nossa Senhora Aparecida' });
+    holidays.push({ date: `${y}-11-02`, name: 'Finados' });
+    holidays.push({ date: `${y}-11-15`, name: 'Proclamação da República' });
+    holidays.push({ date: `${y}-11-20`, name: 'Dia da Consciência Negra' });
+    holidays.push({ date: `${y}-12-25`, name: 'Natal' });
+
+    const easter = getEasterDate(y);
+    const goodFriday = new Date(easter); goodFriday.setUTCDate(easter.getUTCDate() - 2);
+    holidays.push({ date: formatDateStr(goodFriday), name: 'Sexta-feira Santa' });
+
+    const carnivalMon = new Date(easter); carnivalMon.setUTCDate(easter.getUTCDate() - 48);
+    holidays.push({ date: formatDateStr(carnivalMon), name: 'Carnaval (Segunda)' });
+
+    const carnivalTue = new Date(easter); carnivalTue.setUTCDate(easter.getUTCDate() - 47);
+    holidays.push({ date: formatDateStr(carnivalTue), name: 'Carnaval (Terça)' });
+
+    const corpusChristi = new Date(easter); corpusChristi.setUTCDate(easter.getUTCDate() + 60);
+    holidays.push({ date: formatDateStr(corpusChristi), name: 'Corpus Christi' });
+  }
+  return holidays;
+}
 
 function getHolidayOnDate(dateStr) {
-  return HOLIDAYS.find(h => h.date === dateStr) || null;
+  const year = parseInt(dateStr.split('-')[0], 10);
+  const holidays = getBrazilianHolidays(year - 1, year + 1);
+  return holidays.find(h => h.date === dateStr) || null;
 }
 
 function formatDateBR(dateStr) {

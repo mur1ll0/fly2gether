@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { searchSingleFlights, searchCombinedFlights } from '../services/flightEngine.js';
+import { searchSingleFlights, searchCombinedFlights, diagnoseAirportRoute } from '../services/flightEngine.js';
 import { searchGoogleFlights, getGoogleFlightsBookingUrl } from '../services/providers/googleFlightsProvider.js';
 
 export async function handleSearchFlights(req, res) {
@@ -49,7 +49,13 @@ export async function handleSearchFlights(req, res) {
         return res.json(results);
       }
 
-      return res.json({ mode: 'flytogether', total: results.length, results });
+      const finalResults = Array.isArray(results) ? results : (results?.results || []);
+      const diagnostics = results?.diagnostics || (finalResults.length === 0 ? {
+        person1: { origin: orig1, destination, ...diagnoseAirportRoute(orig1, destination) },
+        person2: { origin: origin2, destination, ...diagnoseAirportRoute(origin2, destination) }
+      } : null);
+
+      return res.json({ mode: 'flytogether', total: finalResults.length, results: finalResults, diagnostics });
     } else {
       if (!origin || !destination) {
         return res.status(400).json({ error: 'Informe Aeroporto de Origem e Destino.' });
@@ -72,7 +78,12 @@ export async function handleSearchFlights(req, res) {
         return res.json(results);
       }
 
-      return res.json({ mode: 'normal', total: results.length, results });
+      let diagnostics = null;
+      if (Array.isArray(results) && results.length === 0) {
+        diagnostics = diagnoseAirportRoute(origin, destination);
+      }
+
+      return res.json({ mode: 'normal', total: results.length, results, diagnostics });
     }
   } catch (error) {
     console.error('Erro na busca de voos:', error.message);

@@ -1,4 +1,7 @@
 import puppeteer from 'puppeteer';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 function log(message) {
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
@@ -83,20 +86,22 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate }
   const url = `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origin.toUpperCase()}%20para%20${destination.toUpperCase()}%20em%20${departureDate}`;
   
   log(`Iniciando raspagem para Rota: ${origin.toUpperCase()} ➔ ${destination.toUpperCase()} | Data: ${departureDate}`);
-  log(`Carregando navegador Puppeteer...`);
+  const tmpDir = os.tmpdir();
+  const userDataDir = fs.mkdtempSync(path.join(tmpDir, 'puppeteer_profile_'));
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--no-first-run',
-      '--disable-features=FirstPartySets'
-    ]
-  });
-
+  let browser = null;
   try {
+    browser = await puppeteer.launch({
+      headless: true,
+      userDataDir,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--disable-features=FirstPartySets'
+      ]
+    });
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 1000 });
     await page.setExtraHTTPHeaders({
@@ -228,8 +233,15 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate }
       try {
         await browser.close();
       } catch (closeErr) {
-        log(`⚠️ Aviso ao fechar navegador (limpeza de perfis temporários): ${closeErr.message}`);
+        log(`⚠️ Aviso ao fechar navegador: ${closeErr.message}`);
       }
+    }
+    try {
+      if (fs.existsSync(userDataDir)) {
+        fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3 });
+      }
+    } catch (cleanErr) {
+      // Silencia erros de limpeza no Windows
     }
   }
 }

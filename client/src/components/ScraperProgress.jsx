@@ -1,18 +1,20 @@
 import React from 'react';
-import { Bot, RefreshCw, XCircle, CheckCircle2, Sparkles, Plane, Layers } from 'lucide-react';
+import { Bot, RefreshCw, XCircle, CheckCircle2, Sparkles, Plane, Layers, Flame, AlertTriangle } from 'lucide-react';
 
 export default function ScraperProgress({
   scrapingMessage,
   completedCount = 0,
   totalCount = 0,
+  totalOffersFound = 0,
+  legDetails = [],
   onCancel
 }) {
   const percentage = totalCount > 0 
-    ? Math.min(100, Math.max(10, Math.round((completedCount / totalCount) * 100))) 
-    : 15;
+    ? Math.min(100, Math.round((completedCount / totalCount) * 100)) 
+    : 0;
 
   return (
-    <div className="glass-panel p-8 text-center rounded-3xl border border-brand-500/40 bg-slate-900/80 backdrop-blur-xl shadow-glow space-y-6 max-w-2xl mx-auto my-6 animate-fadeIn">
+    <div className="glass-panel p-6 md:p-8 text-center rounded-3xl border border-brand-500/40 bg-slate-900/90 backdrop-blur-xl shadow-glow space-y-6 max-w-2xl mx-auto my-6 animate-fadeIn">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4">
         <div className="flex items-center space-x-3">
@@ -27,7 +29,7 @@ export default function ScraperProgress({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Nosso robô está minerando tarifas e combinações de voos
+              Nosso robô está minerando tarifas e combinações de voos em tempo real
             </p>
           </div>
         </div>
@@ -49,10 +51,10 @@ export default function ScraperProgress({
         <div className="flex items-center justify-between text-xs font-semibold">
           <span className="text-slate-300 flex items-center space-x-1.5">
             <Layers className="w-4 h-4 text-brand-400" />
-            <span>Progresso das Consultas</span>
+            <span>Progresso da Varredura</span>
           </span>
           <span className="text-brand-400 font-mono font-bold text-sm">
-            {totalCount > 0 ? `${completedCount} de ${totalCount} (${percentage}%)` : `${percentage}%`}
+            {completedCount} de {totalCount} trechos ({percentage}%)
           </span>
         </div>
 
@@ -60,7 +62,7 @@ export default function ScraperProgress({
         <div className="w-full h-4 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800 shadow-inner relative">
           {/* Inner Bar */}
           <div
-            className="h-full bg-gradient-to-r from-brand-600 via-purple-500 to-amber-400 rounded-full transition-all duration-700 ease-out relative overflow-hidden shadow-glow"
+            className="h-full bg-gradient-to-r from-brand-600 via-purple-500 to-amber-400 rounded-full transition-all duration-500 ease-out relative overflow-hidden shadow-glow"
             style={{ width: `${percentage}%` }}
           >
             {/* Animated Shine Effect */}
@@ -69,34 +71,90 @@ export default function ScraperProgress({
         </div>
       </div>
 
-      {/* Dynamic Status Message */}
-      <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-left space-y-2">
+      {/* Dynamic Status Message & Live Offer Counter */}
+      <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-left space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center space-x-2 text-xs font-bold text-amber-400">
+            <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span>{totalOffersFound} voos catalogados até agora nesta busca</span>
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono">MongoDB Sync</span>
+        </div>
+
         <div className="flex items-start space-x-2.5">
           <RefreshCw className="w-4 h-4 text-brand-400 animate-spin mt-0.5 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-semibold text-slate-200 leading-snug">
-              {scrapingMessage || 'Raspando trechos aéreos no Google Flights...'}
-            </p>
-            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-              O robô analisa companhias como LATAM, GOL e Azul em tempo real. Os resultados serão atualizados na tela assim que cada lote for finalizado.
+            <p className="text-xs font-semibold text-slate-200 leading-snug">
+              {scrapingMessage || 'Coletando trechos aéreos no Google Flights...'}
             </p>
           </div>
         </div>
       </div>
 
+      {/* Live Leg Feed (Cards/Badges por perna pesquisada) */}
+      {legDetails && legDetails.length > 0 && (
+        <div className="space-y-2 text-left">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+            <span>Status Detalhado por Rota & Data</span>
+            <span className="text-slate-500">{legDetails.length} trechos</span>
+          </div>
+          <div className="max-h-48 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-2 custom-scrollbar">
+            {legDetails.map((leg, idx) => {
+              const isDone = leg.status === 'completed';
+              const dateStr = leg.departureDate ? leg.departureDate.substring(5) : '';
+              return (
+                <div
+                  key={idx}
+                  className={`p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
+                    isDone
+                      ? leg.flightsCount > 0
+                        ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300'
+                        : 'bg-amber-950/20 border-amber-500/20 text-amber-300'
+                      : 'bg-slate-950/50 border-slate-800 text-slate-400 animate-pulse'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 truncate">
+                    {isDone ? (
+                      leg.flightsCount > 0 ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                      )
+                    ) : (
+                      <RefreshCw className="w-3.5 h-3.5 text-brand-400 animate-spin flex-shrink-0" />
+                    )}
+                    <span className="font-mono font-bold">
+                      {leg.origin}➔{leg.destination} ({dateStr})
+                    </span>
+                  </div>
+
+                  <span className="font-semibold text-[11px] ml-2 flex-shrink-0">
+                    {isDone
+                      ? leg.flightsCount > 0
+                        ? `${leg.flightsCount} voos`
+                        : '0 voos'
+                      : 'Buscando...'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Step Indicators */}
       <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80">
         <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800 text-center">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto mb-1" />
-          <span className="text-[10px] font-semibold text-slate-300 block">1. Rotas Mapeadas</span>
+          <span className="text-[10px] font-semibold text-slate-300 block">1. Mapeando Rotas</span>
         </div>
         <div className="p-2 rounded-lg bg-brand-500/10 border border-brand-500/30 text-center">
           <Plane className="w-4 h-4 text-brand-400 mx-auto mb-1 animate-pulse" />
-          <span className="text-[10px] font-bold text-brand-300 block">2. Minerando Preços</span>
+          <span className="text-[10px] font-bold text-brand-300 block">2. Coletando Ofertas</span>
         </div>
         <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800 text-center">
           <Sparkles className="w-4 h-4 text-amber-400 mx-auto mb-1 opacity-60" />
-          <span className="text-[10px] font-semibold text-slate-400 block">3. Ordenando Sincronia</span>
+          <span className="text-[10px] font-semibold text-slate-400 block">3. Sincronizando Casal</span>
         </div>
       </div>
     </div>

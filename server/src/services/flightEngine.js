@@ -4,40 +4,10 @@ import FlightCache from '../models/FlightCache.js';
 import { scrapeGoogleFlights } from './providers/googleFlightsScraper.js';
 import { triggerGithubScraper } from '../utils/githubDispatcher.js';
 
+import { getBrazilianHolidays, getHolidayInfo } from '../utils/holidays.js';
+
 // Cache em memória de rotas já disparadas para o GitHub Actions para evitar disparos duplicados
 const recentlyTriggered = new Set();
-
-// Lista de feriados nacionais do Brasil (2026 e 2027) para fins de emendas e finais de semana prolongados
-const HOLIDAYS = [
-  // 2026
-  { date: '2026-01-01', name: 'Ano Novo' },
-  { date: '2026-02-16', name: 'Carnaval (Segunda)' },
-  { date: '2026-02-17', name: 'Carnaval (Terça)' },
-  { date: '2026-04-03', name: 'Sexta-feira Santa' },
-  { date: '2026-04-21', name: 'Tiradentes' },
-  { date: '2026-05-01', name: 'Dia do Trabalho' },
-  { date: '2026-06-04', name: 'Corpus Christi' },
-  { date: '2026-09-07', name: 'Independência do Brasil' },
-  { date: '2026-10-12', name: 'Nossa Senhora Aparecida' },
-  { date: '2026-11-02', name: 'Finados' },
-  { date: '2026-11-15', name: 'Proclamação da República' },
-  { date: '2026-11-20', name: 'Dia da Consciência Negra' },
-  { date: '2026-12-25', name: 'Natal' },
-  // 2027
-  { date: '2027-01-01', name: 'Ano Novo' },
-  { date: '2027-02-08', name: 'Carnaval (Segunda)' },
-  { date: '2027-02-09', name: 'Carnaval (Terça)' },
-  { date: '2027-03-26', name: 'Sexta-feira Santa' },
-  { date: '2027-04-21', name: 'Tiradentes' },
-  { date: '2027-05-01', name: 'Dia do Trabalho' },
-  { date: '2027-05-27', name: 'Corpus Christi' },
-  { date: '2027-09-07', name: 'Independência do Brasil' },
-  { date: '2027-10-12', name: 'Nossa Senhora Aparecida' },
-  { date: '2027-11-02', name: 'Finados' },
-  { date: '2027-11-15', name: 'Proclamação da República' },
-  { date: '2027-11-20', name: 'Dia da Consciência Negra' },
-  { date: '2027-12-25', name: 'Natal' }
-];
 
 const AIRLINES = [
   { code: 'LA', name: 'LATAM Airlines' },
@@ -53,7 +23,7 @@ function getRouteBasePrice(origin, dest) {
 }
 
 function getHolidayOnDate(dateStr) {
-  return HOLIDAYS.find(h => h.date === dateStr) || null;
+  return getHolidayInfo(dateStr);
 }
 
 /**
@@ -62,6 +32,46 @@ function getHolidayOnDate(dateStr) {
 function isWeekend(dateStr) {
   const day = new Date(dateStr).getUTCDay();
   return day === 0 || day === 6; // 0 = Domingo, 6 = Sábado
+}
+
+/**
+ * Diagnóstico inteligente de conectividade de malha aérea entre aeroportos
+ */
+export function diagnoseAirportRoute(origin, destination) {
+  const orig = (origin || '').toUpperCase();
+  const dest = (destination || '').toUpperCase();
+
+  // Chapecó (XAP) -> São Paulo Congonhas (CGH)
+  if (orig === 'XAP' && dest === 'CGH') {
+    return {
+      hasDirectConnection: false,
+      reason: `O aeroporto de Chapecó (XAP) não possui voos operando para São Paulo Congonhas (CGH). Na malha aérea brasileira, Chapecó conecta-se prioritariamente com São Paulo Guarulhos (GRU) e Campinas (VCP).`,
+      suggestedDestinations: ['GRU', 'VCP']
+    };
+  }
+
+  if (orig === 'XAP' && !['GRU', 'VCP', 'CWB', 'FLN'].includes(dest)) {
+    return {
+      hasDirectConnection: false,
+      reason: `O aeroporto de Chapecó (XAP) possui voos comerciais limitados principalmente para Guarulhos (GRU), Viracopos (VCP) e Curitiba (CWB).`,
+      suggestedDestinations: ['GRU', 'VCP']
+    };
+  }
+
+  // Santos Dumont (SDU)
+  if (orig === 'SDU' && !['CGH', 'BSB', 'VCP', 'CNF'].includes(dest)) {
+    return {
+      hasDirectConnection: false,
+      reason: `O aeroporto Santos Dumont (SDU) opera rotas restritas principalmente para Congonhas (CGH), Brasília (BSB) e Confins (CNF). Para outros destinos, consulte Galeão (GIG).`,
+      suggestedDestinations: ['GIG']
+    };
+  }
+
+  return {
+    hasDirectConnection: true,
+    reason: `Não foram encontrados voos disponíveis operando entre ${orig} e ${dest} nas datas selecionadas.`,
+    suggestedDestinations: []
+  };
 }
 
 /**
@@ -249,7 +259,7 @@ function calculateSharedStayMinutes(f1, f2, departureDate, returnDate) {
 }
 
 // Helper to generate mock flights as fallback
-function generateMockFlights(origin, destination, departureDate, returnDate, pair = {}) {
+export function generateMockFlights(origin, destination, departureDate, returnDate, pair = {}) {
   const basePrice = getRouteBasePrice(origin, destination);
   const mockOffers = [];
   
@@ -413,6 +423,56 @@ function revalidateLiveSearch(origin, destination, departureDate, returnDate) {
   });
 }
 
+const localScrapeQueue = [];
+let activeScrapesCount = 0;
+const MAX_CONCURRENT_SCRAPES = 2;
+const queuedKeys = new Set();
+
+function triggerLocalScrape(origin, destination, date) {
+  const key = `${origin}-${destination}-${date}`;
+  if (queuedKeys.has(key)) return;
+  queuedKeys.add(key);
+
+  localScrapeQueue.push({ origin, destination, date, key });
+  processLocalScrapeQueue();
+}
+
+function processLocalScrapeQueue() {
+  if (activeScrapesCount >= MAX_CONCURRENT_SCRAPES || localScrapeQueue.length === 0) return;
+
+  const task = localScrapeQueue.shift();
+  activeScrapesCount++;
+
+  Promise.resolve().then(async () => {
+    try {
+      console.log(`[Fila Local (${activeScrapesCount}/${MAX_CONCURRENT_SCRAPES})] Puppeteer iniciando para ${task.origin}➔${task.destination} em ${task.date}...`);
+      const flightsList = await scrapeGoogleFlights({ origin: task.origin, destination: task.destination, departureDate: task.date });
+      await FlightCache.findOneAndUpdate(
+        { origin: task.origin, destination: task.destination, departureDate: task.date, returnDate: null },
+        { flights: flightsList || [], scrapedAt: new Date(), source: 'scraper', status: 'completed' },
+        { upsert: true }
+      );
+      console.log(`[Fila Local] ✅ Concluído para ${task.origin}➔${task.destination} em ${task.date} (${flightsList?.length || 0} voos)`);
+    } catch (err) {
+      console.error(`[Fila Local] ❌ Falha na raspagem para ${task.origin}➔${task.destination} em ${task.date}:`, err.message);
+      await FlightCache.findOneAndUpdate(
+        { origin: task.origin, destination: task.destination, departureDate: task.date, returnDate: null },
+        { flights: [], scrapedAt: new Date(), source: 'scraper', status: 'completed' },
+        { upsert: true }
+      );
+    } finally {
+      queuedKeys.delete(task.key);
+      activeScrapesCount--;
+      processLocalScrapeQueue();
+    }
+  }).catch((err) => {
+    console.error(`[Fila Local Warning] Falha na fila:`, err.message);
+    queuedKeys.delete(task.key);
+    activeScrapesCount--;
+    processLocalScrapeQueue();
+  });
+}
+
 // Resolve voos de perna única (One-Way) usando Cache unificado + SWR + Scraper Local/Nuvem
 async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
   const originUpper = origin.toUpperCase();
@@ -431,12 +491,20 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
     if (cached.status === 'pending') {
       const isStalePending = new Date() - cached.scrapedAt > 5 * 60 * 1000; // 5 minutos
       if (!isStalePending) {
-        console.log(`[Cache Pending] Raspagem já em andamento para ${originUpper}➔${destUpper} em ${date}`);
+        const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
+        if (isLocal) {
+          triggerLocalScrape(originUpper, destUpper, date);
+        } else if (!useLiveApi) {
+          triggerGithubScraper(originUpper, destUpper, date).catch(() => {});
+        }
+
         return {
           status: 'scraping',
-          message: 'O robô está coletando passagens aéreas...',
-          completedCount: 0,
-          totalCount: 1
+          origin: originUpper,
+          destination: destUpper,
+          departureDate: date,
+          flightsCount: 0,
+          isCompleted: false
         };
       }
       console.log(`[Cache Pending Stale] Tentativa de raspagem anterior expirou. Reiniciando...`);
@@ -448,87 +516,60 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
       } else {
         console.log(`[Cache Stale] Perna expirada. Retornando cache e revalidando: ${originUpper}➔${destUpper} em ${date}`);
         triggerRevalidation(originUpper, destUpper, date);
-        // Retorna marcando como dados históricos expirados
         return cached.flights.map(f => ({ ...f, isStaleCache: true, cachedAt: cached.scrapedAt }));
       }
     }
   }
 
-  // 2. Cache Miss: Rota não cadastrada no MongoDB
+  // 2. Cache Miss: Rota inédita
   console.log(`[Cache Miss] Perna inédita: ${originUpper}➔${destUpper} em ${date}`);
 
-  // Se local, executa síncrono para dar resposta imediata ao dev
+  // Marca como pending no banco imediatamente
+  await FlightCache.findOneAndUpdate(
+    { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+    { flights: [], scrapedAt: new Date(), source: 'scraper', status: 'pending' },
+    { upsert: true }
+  );
+
   const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
   if (isLocal) {
-    console.log(`[Local Scrape] Executando Puppeteer síncrono local...`);
-    try {
-      const flightsList = await scrapeGoogleFlights({ origin: originUpper, destination: destUpper, departureDate: date });
-      if (flightsList && flightsList.length > 0) {
-        await FlightCache.findOneAndUpdate(
-          { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
-          { flights: flightsList, scrapedAt: new Date(), source: 'scraper', status: 'completed' },
-          { upsert: true }
-        );
-        return flightsList;
-      }
-      // Se falhar a raspagem, retorna simulador como contingência
-      console.warn(`[Local Scrape] Raspagem retornou vazia. Usando simulador como contingência.`);
-      return generateMockFlights(originUpper, destUpper, date, null);
-    } catch (err) {
-      console.error(`[Local Scrape] Falha crítica de raspagem local. Usando simulador.`, err.message);
-      return generateMockFlights(originUpper, destUpper, date, null);
-    }
-  }
-
-  // Em Produção (Vercel)
-  if (useLiveApi) {
-    // Se for modo pago, busca na API imediatamente
+    triggerLocalScrape(originUpper, destUpper, date);
+  } else if (useLiveApi) {
     console.log(`[API Fallback] Buscando perna única via SerpAPI...`);
     try {
       const liveOffers = await searchGoogleFlights({ origin: originUpper, destination: destUpper, departureDate: date });
-      if (liveOffers && liveOffers.length > 0) {
-        await FlightCache.findOneAndUpdate(
-          { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
-          { flights: liveOffers, scrapedAt: new Date(), source: 'api', status: 'completed' },
-          { upsert: true }
-        );
-        return liveOffers;
-      }
-      return generateMockFlights(originUpper, destUpper, date, null);
+      await FlightCache.findOneAndUpdate(
+        { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+        { flights: liveOffers || [], scrapedAt: new Date(), source: 'api', status: 'completed' },
+        { upsert: true }
+      );
+      return liveOffers || [];
     } catch (err) {
-      console.error(`[API Fallback] Falha no SerpAPI. Usando simulador.`, err.message);
-      return generateMockFlights(originUpper, destUpper, date, null);
+      console.error(`[API Fallback] Falha no SerpAPI para ${originUpper}➔${destUpper}:`, err.message);
+      await FlightCache.findOneAndUpdate(
+        { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
+        { flights: [], scrapedAt: new Date(), source: 'api', status: 'completed' },
+        { upsert: true }
+      );
+      return [];
     }
   } else {
-    // Modo Robô gratuito em produção: salva status 'pending' no banco para evitar loops de polling
-    console.log(`[GitHub Trigger] Criando registro pendente no cache para ${originUpper}➔${destUpper} em ${date}...`);
-    await FlightCache.findOneAndUpdate(
-      { origin: originUpper, destination: destUpper, departureDate: date, returnDate: null },
-      { flights: [], scrapedAt: new Date(), source: 'scraper', status: 'pending' },
-      { upsert: true }
-    );
-
-    // Dispara a Actions do GitHub de forma otimizada (apenas 1 vez por rota/minuto)
     const triggerKey = `${originUpper}-${destUpper}`;
     if (!recentlyTriggered.has(triggerKey)) {
       recentlyTriggered.add(triggerKey);
-      setTimeout(() => recentlyTriggered.delete(triggerKey), 60000); // 1 minuto de debounce
-      
-      console.log(`[GitHub Trigger] Acionando pipeline do GitHub Actions para a rota ${originUpper}➔${destUpper}...`);
-      triggerGithubScraper(originUpper, destUpper).catch((err) => {
-        console.error('❌ Falha ao disparar GitHub Actions:', err.message);
-      });
-    } else {
-      console.log(`[GitHub Trigger] Pipeline já foi acionado recentemente para ${originUpper}➔${destUpper}. Ignorando disparo duplicado.`);
+      setTimeout(() => recentlyTriggered.delete(triggerKey), 60000);
+      triggerGithubScraper(originUpper, destUpper, date).catch(() => {});
     }
-
-    return {
-      status: 'scraping',
-      message: 'Aguarde um momento. Nosso robô está coletando as passagens aéreas...',
-      completedCount: 0,
-      totalCount: 1
-    };
   }
+
+  return {
+    status: 'scraping',
+    origin: originUpper,
+    destination: destUpper,
+    departureDate: date,
+    flightsCount: 0,
+    isCompleted: false
+  };
 }
 
 // Resolve o par de voos (Ida + Volta)
@@ -570,10 +611,10 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
         );
         return liveOffers;
       }
-      return generateMockFlights(originUpper, destUpper, departureDate, returnDate);
+      return [];
     } catch (err) {
-      console.error(`[API Call Error] Usando simulador como contingência.`, err.message);
-      return generateMockFlights(originUpper, destUpper, departureDate, returnDate);
+      console.error(`[API Call Error] Falha na busca SerpAPI combinada:`, err.message);
+      return [];
     }
   }
 
@@ -675,35 +716,73 @@ export async function searchSingleFlights({
       useLiveApi: boolLive
     });
 
-    if (flightResults && flightResults.status === 'scraping') {
-      return flightResults; // Propaga objeto de scraping
-    }
-
-    return (flightResults || []).map(flight => ({
-      ...flight,
-      isWeekendOrHoliday: pair.isWeekendOrHoliday,
-      holidayDetails: pair.holidayDetails
-    }));
+    return { pair, flightResults };
   });
 
   const resolvedBatches = await Promise.all(searchPromises);
 
-  // Se houver algum em processo de raspagem na fila, retorna sinalização com contagem de progresso
-  const scrapingBatch = resolvedBatches.find(batch => batch && batch.status === 'scraping');
-  if (scrapingBatch) {
-    const completedCount = resolvedBatches.filter(batch => Array.isArray(batch)).length;
-    const totalCount = resolvedBatches.length;
+  let completedCount = 0;
+  const legDetails = [];
+  const allFlights = [];
+  let isAnyScraping = false;
+
+  for (const batch of resolvedBatches) {
+    const { pair, flightResults } = batch;
+    const isScraping = flightResults && (flightResults.status === 'scraping' || (Array.isArray(flightResults) && flightResults.some(r => r && r.status === 'scraping')));
+
+    const depDate = pair?.departureDate;
+    const retDate = pair?.returnDate;
+
+    if (isScraping) {
+      isAnyScraping = true;
+      legDetails.push({
+        origin,
+        destination,
+        departureDate: depDate,
+        returnDate: retDate,
+        status: 'scraping',
+        flightsCount: 0
+      });
+    } else {
+      completedCount++;
+      const flightsArray = Array.isArray(flightResults) ? flightResults : [];
+      legDetails.push({
+        origin,
+        destination,
+        departureDate: depDate,
+        returnDate: retDate,
+        status: 'completed',
+        flightsCount: flightsArray.length
+      });
+
+      flightsArray.forEach(flight => {
+        allFlights.push({
+          ...flight,
+          origin: flight.origin || origin,
+          destination: flight.destination || destination,
+          departureDate: flight.departureDate || depDate,
+          returnDate: flight.returnDate || retDate,
+          isWeekendOrHoliday: pair?.isWeekendOrHoliday || false,
+          holidayDetails: pair?.holidayDetails || null
+        });
+      });
+    }
+  }
+
+  if (isAnyScraping) {
+    const totalCount = candidateDates.length;
+    const totalOffersFound = legDetails.reduce((sum, l) => sum + (l.flightsCount || 0), 0);
     return {
       status: 'scraping',
-      message: `O robô está coletando as passagens aéreas... (${completedCount} de ${totalCount} datas concluídas)`,
+      message: `O robô está coletando passagens aéreas... (${completedCount} de ${totalCount} datas concluídas | ${totalOffersFound} ofertas catalogadas)`,
       completedCount,
-      totalCount
+      totalCount,
+      totalOffersFound,
+      legDetails
     };
   }
 
-  resolvedBatches.forEach(batch => {
-    if (Array.isArray(batch)) results.push(...batch);
-  });
+  results.push(...allFlights);
 
   // Ordenação final
   results.sort((a, b) => {
@@ -761,20 +840,26 @@ export async function searchCombinedFlights({
   const p2IsScraping = person2Flights && person2Flights.status === 'scraping';
 
   if (p1IsScraping || p2IsScraping) {
-    const p1Total = p1IsScraping ? (person1Flights.totalCount || 8) : 8;
+    const p1Total = p1IsScraping ? (person1Flights.totalCount || 8) : (Array.isArray(person1Flights) ? (new Set(person1Flights.map(f => f.departureDate)).size || 8) : 8);
     const p1Completed = p1IsScraping ? (person1Flights.completedCount || 0) : p1Total;
+    const p1Legs = p1IsScraping ? (person1Flights.legDetails || []) : (Array.isArray(person1Flights) ? [{ origin: origin1, destination, status: 'completed', flightsCount: person1Flights.length }] : []);
 
-    const p2Total = p2IsScraping ? (person2Flights.totalCount || 8) : 8;
+    const p2Total = p2IsScraping ? (person2Flights.totalCount || 8) : (Array.isArray(person2Flights) ? (new Set(person2Flights.map(f => f.departureDate)).size || 8) : 8);
     const p2Completed = p2IsScraping ? (person2Flights.completedCount || 0) : p2Total;
+    const p2Legs = p2IsScraping ? (person2Flights.legDetails || []) : (Array.isArray(person2Flights) ? [{ origin: origin2, destination, status: 'completed', flightsCount: person2Flights.length }] : []);
 
     const totalCompleted = p1Completed + p2Completed;
     const totalCount = p1Total + p2Total;
+    const combinedLegDetails = [...p1Legs, ...p2Legs];
+    const totalOffersFound = combinedLegDetails.reduce((sum, l) => sum + (l.flightsCount || 0), 0);
 
     return {
       status: 'scraping',
-      message: `O robô está coletando voos... (${totalCompleted} de ${totalCount} trechos concluídos)`,
+      message: `O robô está coletando voos do casal... (${totalCompleted} de ${totalCount} trechos concluídos | ${totalOffersFound} ofertas catalogadas)`,
       completedCount: totalCompleted,
-      totalCount
+      totalCount,
+      totalOffersFound,
+      legDetails: combinedLegDetails
     };
   }
 
@@ -870,6 +955,41 @@ export async function searchCombinedFlights({
     }
     return a.combinedPrice - b.combinedPrice;
   });
+
+  if (combinedResults.length === 0) {
+    const p1Array = Array.isArray(person1Flights) ? person1Flights : [];
+    const p2Array = Array.isArray(person2Flights) ? person2Flights : [];
+
+    const getPersonDiag = (orig, flightsArray) => {
+      if (flightsArray.length > 0) {
+        const prices = flightsArray.map(f => f.totalPrice).filter(p => typeof p === 'number' && !isNaN(p) && p > 0);
+        const minPrice = prices.length ? Math.min(...prices) : 0;
+        const maxPrice = prices.length ? Math.max(...prices) : 0;
+        return {
+          hasFlights: true,
+          count: flightsArray.length,
+          minPrice,
+          maxPrice,
+          reason: `Foram encontrados ${flightsArray.length} voos de ${orig} para ${destination}, com valores a partir de R$ ${minPrice.toLocaleString('pt-BR')} até R$ ${maxPrice.toLocaleString('pt-BR')}.`
+        };
+      } else {
+        const routeDiag = diagnoseAirportRoute(orig, destination);
+        return {
+          hasFlights: false,
+          count: 0,
+          ...routeDiag
+        };
+      }
+    };
+
+    const diagnostics = {
+      person1: { origin: origin1, destination, ...getPersonDiag(origin1, p1Array) },
+      person2: { origin: origin2, destination, ...getPersonDiag(origin2, p2Array) },
+      summaryReason: `Como um dos viajantes não encontrou opções de voo no período, não foi possível sincronizar nenhuma viagem combinada do casal.`
+    };
+
+    return { status: 'completed', results: [], diagnostics };
+  }
 
   // Limitar as melhores 5000 opções para evitar estouro de memória e lentidão de carregamento
   return combinedResults.slice(0, 5000);

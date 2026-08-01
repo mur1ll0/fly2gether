@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plane, Users, Calendar, Search, Flame, Sparkles, Filter, ArrowRight, ShieldCheck, Heart, XCircle, BarChart3, ChevronRight, RefreshCw } from 'lucide-react';
+import { Plane, Users, Calendar, Search, Flame, Sparkles, Filter, ArrowRight, ShieldCheck, Heart, XCircle, BarChart3, ChevronRight, RefreshCw, Info } from 'lucide-react';
 import Swal from 'sweetalert2';
 import Navbar from './components/Navbar';
 import AirportAutocomplete from './components/AirportAutocomplete';
@@ -59,6 +59,19 @@ export default function App() {
   const [useLiveApi, setUseLiveApi] = useState(false);
   const [scrapingMessage, setScrapingMessage] = useState('');
   const [scrapingProgress, setScrapingProgress] = useState({ completed: 0, total: 0 });
+  const [hasSearched, setHasSearched] = useState(false);
+  const [searchDiagnostics, setSearchDiagnostics] = useState(null);
+
+  const isQuotaExceeded = serpApiUsage && serpApiUsage.enabled && (
+    (serpApiUsage.total_searches_left !== undefined && serpApiUsage.total_searches_left <= 0) ||
+    (serpApiUsage.this_month_usage !== undefined && serpApiUsage.searches_per_month !== undefined && serpApiUsage.this_month_usage >= serpApiUsage.searches_per_month)
+  );
+
+  useEffect(() => {
+    if (isQuotaExceeded && useLiveApi) {
+      setUseLiveApi(false);
+    }
+  }, [isQuotaExceeded, useLiveApi]);
 
   const abortControllerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
@@ -125,6 +138,7 @@ export default function App() {
         if (res.data?.status !== 'scraping') {
           console.log('✅ [Polling] Coleta concluída com sucesso!');
           setResults(Array.isArray(res.data?.results) ? res.data.results : []);
+          setSearchDiagnostics(res.data?.diagnostics || null);
           setScrapingMessage('');
           setScrapingProgress({ completed: 0, total: 0 });
           setLoading(false);
@@ -138,14 +152,16 @@ export default function App() {
           if (res.data.totalCount !== undefined) {
             setScrapingProgress({
               completed: res.data.completedCount || 0,
-              total: res.data.totalCount || 0
+              total: res.data.totalCount || 0,
+              totalOffersFound: res.data.totalOffersFound || 0,
+              legDetails: res.data.legDetails || []
             });
           }
         }
       } catch (err) {
         console.error('❌ [Polling] Erro no polling de busca:', err);
       }
-    }, 5000); // 5s
+    }, 3000); // Polling responsivo a cada 3s
   };
 
   const handleSearch = async (e) => {
@@ -204,6 +220,7 @@ export default function App() {
     localStorage.setItem('fly2gether_last_search', JSON.stringify(searchCriteria));
 
     setLoading(true);
+    setHasSearched(true);
     setScrapingMessage('');
 
     // Cancelar qualquer requisição ou polling ativos anteriores
@@ -244,12 +261,15 @@ export default function App() {
         if (res.data.totalCount !== undefined) {
           setScrapingProgress({
             completed: res.data.completedCount || 0,
-            total: res.data.totalCount || 0
+            total: res.data.totalCount || 0,
+            totalOffersFound: res.data.totalOffersFound || 0,
+            legDetails: res.data.legDetails || []
           });
         }
         startPollingSearch(params);
       } else {
         setResults(Array.isArray(res.data?.results) ? res.data.results : []);
+        setSearchDiagnostics(res.data?.diagnostics || null);
         setScrapingMessage('');
         setScrapingProgress({ completed: 0, total: 0 });
         setLoading(false);
@@ -661,27 +681,49 @@ export default function App() {
               setDurationDays={setDurationDays}
             />
             {/* Paid API vs Free Scraper Toggle */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-950/40 rounded-2xl border border-slate-800/60 mb-6 space-y-2 sm:space-y-0">
-              <div className="space-y-0.5">
-                <span className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Pesquisar ao Vivo (SerpAPI Paga)
-                </span>
-                <p className="text-xs text-slate-400 max-w-lg">
-                  O modo padrão (robô) usa cache de 24h e é grátis. O modo ao vivo pesquisa tarifas em tempo real consumindo créditos da API.
-                </p>
+            <div className="p-4 bg-slate-950/40 rounded-2xl border border-slate-800/60 mb-6 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    Pesquisar ao Vivo (SerpAPI Paga)
+                  </span>
+                  <p className="text-xs text-slate-400 max-w-lg">
+                    O modo padrão (robô) usa cache de 12h e é grátis. O modo ao vivo pesquisa tarifas em tempo real consumindo créditos da API.
+                  </p>
+                </div>
+                
+                <label className={`relative inline-flex items-center ${isQuotaExceeded ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+                  <input
+                    type="checkbox"
+                    checked={useLiveApi && !isQuotaExceeded}
+                    onChange={(e) => {
+                      if (!isQuotaExceeded) setUseLiveApi(e.target.checked);
+                    }}
+                    disabled={loading || isQuotaExceeded}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-600"></div>
+                </label>
               </div>
-              
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useLiveApi}
-                  onChange={(e) => setUseLiveApi(e.target.checked)}
-                  disabled={loading}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500 peer-checked:after:bg-white peer-checked:after:border-brand-600"></div>
-              </label>
+
+              {/* SerpAPI Quota Usage Info & Limit Warning */}
+              {serpApiUsage && serpApiUsage.enabled && (
+                <div className="pt-2.5 border-t border-slate-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center space-x-1.5 text-slate-300 font-mono">
+                    <BarChart3 className="w-3.5 h-3.5 text-brand-400" />
+                    <span>
+                      Cota Google Flights: <strong className="text-slate-100">{serpApiUsage.this_month_usage} / {serpApiUsage.searches_per_month}</strong> buscas ({serpApiUsage.total_searches_left} restantes)
+                    </span>
+                  </div>
+
+                  {isQuotaExceeded && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 font-bold text-[11px] flex items-center gap-1 animate-pulse">
+                      ⚠️ Cota de API esgotada! Desabilitado por padrão.
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Submit & Cancel Buttons */}
@@ -753,13 +795,7 @@ export default function App() {
                     {filteredAndSortedResults.length} opções
                   </span>
                   
-                  {/* SerpAPI Quota Usage Badge */}
-                  {serpApiUsage && serpApiUsage.enabled && (
-                    <span className="text-xs px-3 py-1 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/25 font-mono font-bold flex items-center space-x-1.5" title="Seu limite mensal do plano gratuito do SerpAPI para buscas ao vivo no Google Flights">
-                      <BarChart3 className="w-3.5 h-3.5 text-brand-400" />
-                      <span>Cota Google Flights: {serpApiUsage.this_month_usage} / {serpApiUsage.searches_per_month} buscas ({serpApiUsage.total_searches_left} restantes)</span>
-                    </span>
-                  )}
+                  {/* SerpAPI Quota Usage Badge Removido do Cabeçalho e Movido para a Box */}
                 </div>
               </h2>
               <p className="text-xs text-slate-400 mt-1">
@@ -793,6 +829,8 @@ export default function App() {
               scrapingMessage={scrapingMessage}
               completedCount={scrapingProgress.completed}
               totalCount={scrapingProgress.total}
+              totalOffersFound={scrapingProgress.totalOffersFound}
+              legDetails={scrapingProgress.legDetails}
               onCancel={handleCancelSearch}
             />
           ) : filteredAndSortedResults.length > 0 ? (
@@ -871,18 +909,77 @@ export default function App() {
               )}
             </div>
           ) : (
-            <div className="glass-panel p-12 text-center rounded-3xl border border-slate-800 space-y-3">
+            <div className="glass-panel p-12 text-center rounded-3xl border border-slate-800 space-y-4">
               <Plane className="w-12 h-12 mx-auto text-slate-600 stroke-1" />
               <h3 className="text-lg font-bold text-slate-300">
-                {results.length > 0
-                  ? 'Nenhum voo corresponde aos filtros ativos (companhia, escala ou troca de aeroporto).'
+                {hasSearched
+                  ? (results.length > 0 
+                      ? 'Nenhum voo corresponde aos filtros de ordenação ativos (companhia, escala ou troca de aeroporto).' 
+                      : 'Nenhum voo foi retornado para a rota e critérios selecionados.')
                   : 'Pronto para buscar! Clique em buscar para trazer passagens em tempo real.'}
               </h3>
-              <p className="text-xs text-slate-500">
-                {results.length > 0
-                  ? 'Tente ajustar os filtros na barra de ordenação acima.'
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                {hasSearched
+                  ? (results.length > 0 
+                      ? 'Tente relaxar os filtros na barra de ordenação acima.' 
+                      : 'Verifique se os aeroportos selecionados possuem voos comerciais que conectem ao destino escolhido.')
                   : 'Informe os aeroportos de partida e destino para ver as melhores datas.'}
               </p>
+
+              {/* Card de Diagnóstico Inteligente de Malha Aérea */}
+              {hasSearched && results.length === 0 && searchDiagnostics && (
+                <div className="mt-6 p-5 rounded-2xl bg-slate-950/90 border border-amber-500/40 text-left max-w-xl mx-auto space-y-3 shadow-xl backdrop-blur-md">
+                  <div className="flex items-center space-x-2 font-bold text-xs uppercase tracking-wider text-amber-400">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                    <span>Diagnóstico da Rota & Malha Aérea</span>
+                  </div>
+
+                  {searchDiagnostics.person1 && (
+                    <div className={`p-3.5 rounded-xl border text-xs ${
+                      searchDiagnostics.person1.hasFlights 
+                        ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200' 
+                        : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+                    }`}>
+                      <div className="font-bold flex items-center space-x-1.5 mb-1">
+                        <span>{searchDiagnostics.person1.hasFlights ? '✅' : '⚠️'}</span>
+                        <span>Pessoa 1 ({searchDiagnostics.person1.origin} ➔ {searchDiagnostics.person1.destination}):</span>
+                      </div>
+                      <p className="leading-relaxed opacity-90 pl-5">
+                        {searchDiagnostics.person1.reason}
+                      </p>
+                    </div>
+                  )}
+
+                  {searchDiagnostics.person2 && (
+                    <div className={`p-3.5 rounded-xl border text-xs ${
+                      searchDiagnostics.person2.hasFlights 
+                        ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200' 
+                        : 'bg-amber-950/30 border-amber-500/30 text-amber-200'
+                    }`}>
+                      <div className="font-bold flex items-center space-x-1.5 mb-1">
+                        <span>{searchDiagnostics.person2.hasFlights ? '✅' : '⚠️'}</span>
+                        <span>Pessoa 2 ({searchDiagnostics.person2.origin} ➔ {searchDiagnostics.person2.destination}):</span>
+                      </div>
+                      <p className="leading-relaxed opacity-90 pl-5">
+                        {searchDiagnostics.person2.reason}
+                      </p>
+                    </div>
+                  )}
+
+                  {searchDiagnostics.summaryReason && (
+                    <p className="text-[11px] text-slate-400 pt-1 italic flex items-center space-x-1">
+                      <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mr-1" />
+                      <span>{searchDiagnostics.summaryReason}</span>
+                    </p>
+                  )}
+
+                  {!searchDiagnostics.person1 && searchDiagnostics.reason && (
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/20 text-xs text-slate-300">
+                      {searchDiagnostics.reason}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
