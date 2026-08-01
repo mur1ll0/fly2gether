@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+// Trava em memória para evitar disparar dispatches em rajada num intervalo menor que 10 segundos
+let lastDispatchTimestamp = 0;
+
 /**
- * Dispara uma execução do scraper de voos no GitHub Actions via repository_dispatch
+ * Dispara UMA ÚNICA execução em lote (1 Runner) no GitHub Actions para processar todas as pernas pendentes no MongoDB
  */
 export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null) {
   const token = process.env.GITHUB_PAT;
@@ -12,18 +15,24 @@ export async function triggerGithubScraper(origin = null, destination = null, de
     return false;
   }
 
+  // Se um disparo foi feito nos últimos 10 segundos para esta instância, reutiliza o runner que já está rodando
+  const now = Date.now();
+  if (now - lastDispatchTimestamp < 10000) {
+    console.log('ℹ️ [GitHub Dispatch] Um Runner já foi ativado recentemente (< 10s). Reutilizando a execução na nuvem.');
+    return true;
+  }
+  lastDispatchTimestamp = now;
+
   try {
     const url = `https://api.github.com/repos/${repo}/dispatches`;
-    const depStr = departureDate || 'N/A';
-    const retStr = returnDate || 'N/A';
-    const origStr = origin ? origin.toUpperCase() : 'ALL';
-    const destStr = destination ? destination.toUpperCase() : 'ALL';
-    console.log(`🌐 [GitHub Dispatch] Disparando Actions para: ${origStr} ➔ ${destStr} | Ida: ${depStr} | Volta: ${retStr}`);
+    const origStr = origin ? origin.toUpperCase() : 'BATCH';
+    const destStr = destination ? destination.toUpperCase() : 'BATCH';
+    console.log(`🌐 [GitHub Dispatch] Disparando 1 Runner Único no GitHub Actions para processar pernas de: ${origStr} ➔ ${destStr}`);
 
     await axios.post(
       url,
       {
-        event_type: 'scrape-route',
+        event_type: 'scrape-batch',
         client_payload: {
           origin: origin ? origin.toUpperCase() : '',
           destination: destination ? destination.toUpperCase() : '',
@@ -42,7 +51,7 @@ export async function triggerGithubScraper(origin = null, destination = null, de
       }
     );
 
-    console.log('✅ [GitHub Dispatch] GitHub Actions acionado com sucesso!');
+    console.log('✅ [GitHub Dispatch] 1 Runner em lote do GitHub Actions ativado com sucesso!');
     return true;
   } catch (error) {
     console.error('❌ [GitHub Dispatch] Erro ao disparar o GitHub Actions:', error.response?.data || error.message);
