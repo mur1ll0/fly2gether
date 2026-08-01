@@ -4,6 +4,11 @@ import axios from 'axios';
  * Dispara uma execução do scraper de voos no GitHub Actions via repository_dispatch
  */
 export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null) {
+  if (process.env.ENABLE_GITHUB_ACTIONS_DISPATCH !== 'true') {
+    console.log('ℹ️ [GitHub Dispatch] Disparo automático desativado temporariamente (ENABLE_GITHUB_ACTIONS_DISPATCH !== true).');
+    return false;
+  }
+
   const token = process.env.GITHUB_PAT;
   const repo = process.env.GITHUB_REPO; // Format: "owner/repo"
 
