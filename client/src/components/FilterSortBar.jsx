@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowUpDown, Filter, Clock } from 'lucide-react';
+import DateMultiSelectDropdown from './DateMultiSelectDropdown';
 
 export const TOLERANCE_STEPS = [
   { value: 0, label: '0m (Exato)' },
@@ -29,6 +30,12 @@ export default function FilterSortBar({
   setStopsFilter,
   hideTransfers,
   setHideTransfers,
+  selectedDates = [],
+  setSelectedDates = () => {},
+  availableDates = [],
+  selectedReturnDates = [],
+  setSelectedReturnDates = () => {},
+  availableReturnDates = [],
   searchMode,
   toleranceIndex,
   setToleranceIndex
@@ -42,8 +49,16 @@ export default function FilterSortBar({
     }
   };
 
+  const toggleDate = (dateStr) => {
+    if (selectedDates.includes(dateStr)) {
+      setSelectedDates(selectedDates.filter(d => d !== dateStr));
+    } else {
+      setSelectedDates([...selectedDates, dateStr]);
+    }
+  };
+
   return (
-    <div className="glass-panel p-4 rounded-2xl border border-slate-800 bg-slate-900/90 mb-6 flex flex-col gap-4">
+    <div className="relative z-30 glass-panel p-4 rounded-2xl border border-slate-800 bg-slate-900/90 mb-6 flex flex-col gap-4">
       {/* Primeira linha: Filtros de Ordenação, Companhias e Escalas */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         {/* Esquerda: Ordenação */}
@@ -120,6 +135,8 @@ export default function FilterSortBar({
             </select>
           </div>
 
+
+
           {/* Checkbox para ocultar troca de aeroporto */}
           <div className="flex items-center">
             <label className="flex items-center space-x-2 cursor-pointer text-xs font-bold text-slate-300 uppercase tracking-wider bg-slate-950/45 px-3 py-1.5 border border-slate-800 rounded-xl hover:border-slate-700 transition-all select-none">
@@ -135,7 +152,31 @@ export default function FilterSortBar({
         </div>
       </div>
 
-      {/* Segunda linha: Tolerância de Sincronia no modo Fly Together */}
+      {/* Segunda linha: Filtro por Datas de Ida e Volta em Dropdowns */}
+      {((availableDates && availableDates.length > 0) || (availableReturnDates && availableReturnDates.length > 0)) && (
+        <div className="border-t border-slate-800/80 pt-3 flex flex-wrap items-center gap-6">
+          {availableDates && availableDates.length > 0 && (
+            <DateMultiSelectDropdown
+              availableDates={availableDates}
+              selectedDates={selectedDates}
+              setSelectedDates={setSelectedDates}
+              label="Data de Ida:"
+              iconColor="text-brand-400"
+            />
+          )}
+          {availableReturnDates && availableReturnDates.length > 0 && (
+            <DateMultiSelectDropdown
+              availableDates={availableReturnDates}
+              selectedDates={selectedReturnDates}
+              setSelectedDates={setSelectedReturnDates}
+              label="Data de Volta:"
+              iconColor="text-purple-400"
+            />
+          )}
+        </div>
+      )}
+
+      {/* Terceira linha: Tolerância de Sincronia no modo Fly Together */}
       {searchMode === 'flytogether' && (
         <div className="border-t border-slate-800/80 pt-4 mt-1 flex flex-col md:flex-row md:items-center gap-4 pb-2">
           <div className="flex items-center space-x-2 shrink-0">

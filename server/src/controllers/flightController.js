@@ -17,7 +17,14 @@ export async function handleSearchFlights(req, res) {
       vacationStart,
       vacationEnd,
       durationDays,
-      useLiveApi
+      useLiveApi,
+      selectedAirlines,
+      stopsFilter,
+      hideTransfers,
+      toleranceIndex,
+      selectedDates,
+      selectedReturnDates,
+      sortBy
     } = req.query;
 
     const boolWeekends = onlyWeekends === 'true' || onlyWeekends === true;
@@ -42,7 +49,14 @@ export async function handleSearchFlights(req, res) {
         vacationStart,
         vacationEnd,
         durationDays: parsedDuration,
-        useLiveApi: boolLive
+        useLiveApi: boolLive,
+        selectedAirlines,
+        stopsFilter,
+        hideTransfers,
+        toleranceIndex,
+        selectedDates,
+        selectedReturnDates,
+        sortBy
       });
 
       if (results && results.status === 'scraping') {
@@ -55,7 +69,14 @@ export async function handleSearchFlights(req, res) {
         person2: { origin: origin2, destination, ...diagnoseAirportRoute(origin2, destination) }
       } : null);
 
-      return res.json({ mode: 'flytogether', total: finalResults.length, results: finalResults, diagnostics });
+      return res.json({
+        mode: 'flytogether',
+        total: finalResults.length,
+        results: finalResults,
+        diagnostics,
+        allAvailableDates: results?.allAvailableDates || [],
+        allAvailableReturnDates: results?.allAvailableReturnDates || []
+      });
     } else {
       if (!origin || !destination) {
         return res.status(400).json({ error: 'Informe Aeroporto de Origem e Destino.' });
@@ -71,7 +92,14 @@ export async function handleSearchFlights(req, res) {
         vacationStart,
         vacationEnd,
         durationDays: parsedDuration,
-        useLiveApi: boolLive
+        useLiveApi: boolLive,
+        selectedAirlines,
+        stopsFilter,
+        hideTransfers,
+        toleranceIndex,
+        selectedDates,
+        selectedReturnDates,
+        sortBy
       });
 
       if (results && results.status === 'scraping') {

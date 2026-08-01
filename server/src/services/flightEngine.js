@@ -643,6 +643,8 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
   return await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi);
 }
 
+const TOLERANCE_VALUES = [0, 15, 30, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, Infinity];
+
 // 1. MODO 1: Busca de Voos Únicos (Simples)
 export async function searchSingleFlights({
   origin,
@@ -654,10 +656,19 @@ export async function searchSingleFlights({
   vacationStart,
   vacationEnd,
   durationDays = 4,
-  useLiveApi = false
+  useLiveApi = false,
+  selectedAirlines,
+  stopsFilter = 'all',
+  hideTransfers = false,
+  selectedDates,
+  selectedReturnDates,
+  sortBy = 'price'
 }) {
-  // Conversão rápida de booleano
   const boolLive = useLiveApi === 'true' || useLiveApi === true;
+  const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
+  const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
+  const returnDatesList = selectedReturnDates ? (Array.isArray(selectedReturnDates) ? selectedReturnDates : String(selectedReturnDates).split(',')).filter(Boolean) : [];
+  const boolHideTransfers = hideTransfers === 'true' || hideTransfers === true;
 
   // Geração de datas inteligente (flexibilidade)
   let candidateDates = [];
@@ -702,9 +713,6 @@ export async function searchSingleFlights({
     }];
   }
 
-  const results = [];
-
-  // Executa as varreduras de cache / revalidações
   const searchPromises = candidateDates.map(async (pair) => {
     const flightResults = await resolveFlightsForPair({
       origin,
@@ -754,14 +762,32 @@ export async function searchSingleFlights({
       });
 
       flightsArray.forEach(flight => {
+        const flightDepDate = flight.departureDate || depDate;
+        const flightRetDate = flight.returnDate || retDate;
+
+        // Aplica filtros backend se definidos
+        if (datesList.length > 0 && !datesList.includes(flightDepDate)) return;
+        if (returnDatesList.length > 0 && flightRetDate && !returnDatesList.includes(flightRetDate)) return;
+        if (airlinesList.length > 0 && flight.airline?.code && !airlinesList.includes(flight.airline.code)) return;
+        if (stopsFilter === 'direct' && (flight.stopsCount > 0 || (flight.returnStopsCount || 0) > 0)) return;
+        if (stopsFilter === 'stops' && flight.stopsCount === 0 && (flight.returnStopsCount || 0) === 0) return;
+        if (boolHideTransfers && (flight.hasAirportTransfer || flight.returnHasAirportTransfer)) return;
+
+        let isNight = true;
+        if (flight.departureTime) {
+          const [h] = flight.departureTime.split(':').map(Number);
+          isNight = h >= 19;
+        }
+
         allFlights.push({
           ...flight,
           origin: flight.origin || origin,
           destination: flight.destination || destination,
-          departureDate: flight.departureDate || depDate,
+          departureDate: flightDepDate,
           returnDate: flight.returnDate || retDate,
           isWeekendOrHoliday: pair?.isWeekendOrHoliday || false,
-          holidayDetails: pair?.holidayDetails || null
+          holidayDetails: pair?.holidayDetails || null,
+          isNightDeparture: isNight
         });
       });
     }
@@ -780,17 +806,19 @@ export async function searchSingleFlights({
     };
   }
 
-  results.push(...allFlights);
-
-  // Ordenação final
-  results.sort((a, b) => {
+  // Ordenação final no backend
+  allFlights.sort((a, b) => {
     if (a.isMegaPromo && !b.isMegaPromo) return -1;
     if (!a.isMegaPromo && b.isMegaPromo) return 1;
     if (onlyWeekends && a.isWeekendOrHoliday && !b.isWeekendOrHoliday) return -1;
+    if (onlyWeekends) {
+      if (a.isNightDeparture && !b.isNightDeparture) return -1;
+      if (!a.isNightDeparture && b.isNightDeparture) return 1;
+    }
     return a.totalPrice - b.totalPrice;
   });
 
-  return results;
+  return allFlights.slice(0, 5000);
 }
 
 // 2. MODO 2: Fly Together (Voos Combinados: Origem 1 + Origem 2 -> Mesmo Destino)
@@ -805,33 +833,27 @@ export async function searchCombinedFlights({
   vacationStart,
   vacationEnd,
   durationDays = 4,
-  useLiveApi = false
+  useLiveApi = false,
+  selectedAirlines,
+  stopsFilter = 'all',
+  hideTransfers = false,
+  toleranceIndex,
+  selectedDates,
+  selectedReturnDates,
+  sortBy = 'sincronia_total'
 }) {
+  const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
+  const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
+  const returnDatesList = selectedReturnDates ? (Array.isArray(selectedReturnDates) ? selectedReturnDates : String(selectedReturnDates).split(',')).filter(Boolean) : [];
+  const boolHideTransfers = hideTransfers === 'true' || hideTransfers === true;
+
+  const tIdx = parseInt(toleranceIndex);
+  const toleranceMinutes = (!isNaN(tIdx) && TOLERANCE_VALUES[tIdx] !== undefined) ? TOLERANCE_VALUES[tIdx] : Infinity;
+
+  // Busca pernas individuais brutas para ter todas as opções de combinação
   const [person1Flights, person2Flights] = await Promise.all([
-    searchSingleFlights({
-      origin: origin1,
-      destination,
-      departureDate,
-      returnDate,
-      onlyWeekends,
-      isVacation,
-      vacationStart,
-      vacationEnd,
-      durationDays,
-      useLiveApi
-    }),
-    searchSingleFlights({
-      origin: origin2,
-      destination,
-      departureDate,
-      returnDate,
-      onlyWeekends,
-      isVacation,
-      vacationStart,
-      vacationEnd,
-      durationDays,
-      useLiveApi
-    })
+    searchSingleFlights({ origin: origin1, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi }),
+    searchSingleFlights({ origin: origin2, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi })
   ]);
 
   const p1IsScraping = person1Flights && person1Flights.status === 'scraping';
@@ -861,21 +883,63 @@ export async function searchCombinedFlights({
     };
   }
 
+  const p1Array = Array.isArray(person1Flights) ? person1Flights : [];
+  const p2Array = Array.isArray(person2Flights) ? person2Flights : [];
+
+  const allAvailableDates = Array.from(new Set([...p1Array.map(f => f.departureDate), ...p2Array.map(f => f.departureDate)].filter(Boolean))).sort();
+  const allAvailableReturnDates = Array.from(new Set([...p1Array.map(f => f.returnDate), ...p2Array.map(f => f.returnDate)].filter(Boolean))).sort();
+
   const combinedResults = [];
 
-  for (const f1 of person1Flights) {
-    for (const f2 of person2Flights) {
+  for (const f1 of p1Array) {
+    for (const f2 of p2Array) {
       if (f1.departureDate === f2.departureDate && f1.returnDate === f2.returnDate) {
-        const combinedPrice = f1.totalPrice + f2.totalPrice;
+        const flightDepDate = f1.departureDate;
+        const flightRetDate = f1.returnDate;
 
+        // 1. Filtro por Data de Ida Selecionada
+        if (datesList.length > 0 && !datesList.includes(flightDepDate)) continue;
+
+        // 2. Filtro por Data de Volta Selecionada
+        if (returnDatesList.length > 0 && flightRetDate && !returnDatesList.includes(flightRetDate)) continue;
+
+        // 2. Filtro por Companhia Aérea
+        const code1 = f1.airline?.code;
+        const code2 = f2.airline?.code;
+        if (airlinesList.length > 0 && (!airlinesList.includes(code1) || !airlinesList.includes(code2))) continue;
+
+        // 3. Filtro por Escalas
+        if (stopsFilter === 'direct') {
+          if (f1.stopsCount > 0 || f2.stopsCount > 0 || (f1.returnStopsCount || 0) > 0 || (f2.returnStopsCount || 0) > 0) continue;
+        } else if (stopsFilter === 'stops') {
+          if (f1.stopsCount === 0 && f2.stopsCount === 0 && (f1.returnStopsCount || 0) === 0 && (f2.returnStopsCount || 0) === 0) continue;
+        }
+
+        // 4. Filtro por Troca de Aeroporto
+        if (boolHideTransfers) {
+          if (f1.hasAirportTransfer || f1.returnHasAirportTransfer || f2.hasAirportTransfer || f2.returnHasAirportTransfer) continue;
+        }
+
+        // 5. Filtro por Tolerância de Sincronia de Pouso/Decolagem
         const [h1, m1] = f1.arrivalTime.split(':').map(Number);
         const [h2, m2] = f2.arrivalTime.split(':').map(Number);
         const arrivalDeltaMinutes = Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
 
-        const isSynchronized = arrivalDeltaMinutes <= 60;
-        const hasPromo = f1.isMegaPromo || f2.isMegaPromo;
+        if (toleranceMinutes !== Infinity) {
+          let returnDepartureDelta = 0;
+          let hasReturn = false;
+          if (f1.returnDepartureTime && f2.returnDepartureTime) {
+            const [rh1, rm1] = f1.returnDepartureTime.split(':').map(Number);
+            const [rh2, rm2] = f2.returnDepartureTime.split(':').map(Number);
+            returnDepartureDelta = Math.abs((rh1 * 60 + rm1) - (rh2 * 60 + rm2));
+            hasReturn = true;
+          }
+          const averageDelta = hasReturn ? (arrivalDeltaMinutes + returnDepartureDelta) / 2 : arrivalDeltaMinutes;
+          if (averageDelta > toleranceMinutes) continue;
+        }
 
-        // Calcular tempo compartilhado juntos no destino (em minutos)
+        const combinedPrice = f1.totalPrice + f2.totalPrice;
+        const hasPromo = f1.isMegaPromo || f2.isMegaPromo;
         const sharedStayMinutes = calculateSharedStayMinutes(f1, f2, f1.departureDate, f1.returnDate);
         const hours = Math.floor(sharedStayMinutes / 60);
         const mins = sharedStayMinutes % 60;
@@ -907,7 +971,8 @@ export async function searchCombinedFlights({
             returnStopsList: f1.returnStopsList || [],
             hasAirportTransfer: f1.hasAirportTransfer,
             returnHasAirportTransfer: f1.returnHasAirportTransfer,
-            bookingUrl: f1.bookingUrl
+            bookingUrl: f1.bookingUrl,
+            isNightDeparture: f1.isNightDeparture
           },
           person2: {
             origin: origin2,
@@ -930,11 +995,12 @@ export async function searchCombinedFlights({
             returnStopsList: f2.returnStopsList || [],
             hasAirportTransfer: f2.hasAirportTransfer,
             returnHasAirportTransfer: f2.returnHasAirportTransfer,
-            bookingUrl: f2.bookingUrl
+            bookingUrl: f2.bookingUrl,
+            isNightDeparture: f2.isNightDeparture
           },
           combinedPrice,
           arrivalDeltaMinutes,
-          isSynchronized,
+          isSynchronized: arrivalDeltaMinutes <= 60,
           hasPromo,
           sharedStayMinutes,
           sharedStayFormatted,
@@ -946,18 +1012,36 @@ export async function searchCombinedFlights({
     }
   }
 
-  // Ordenação Padrão Fly Together: Maximo de tempo juntos no destino, e em seguida menor preço combinado
+  // Ordenação final backend
   combinedResults.sort((a, b) => {
-    if (b.sharedStayMinutes !== a.sharedStayMinutes) {
-      return b.sharedStayMinutes - a.sharedStayMinutes;
+    if (a.hasPromo && !b.hasPromo) return -1;
+    if (!a.hasPromo && b.hasPromo) return 1;
+
+    if (onlyWeekends) {
+      const aNight = a.person1?.isNightDeparture && a.person2?.isNightDeparture;
+      const bNight = b.person1?.isNightDeparture && b.person2?.isNightDeparture;
+      if (aNight && !bNight) return -1;
+      if (!aNight && bNight) return 1;
     }
+
+    if (sortBy === 'tempo_juntos') {
+      if (b.sharedStayMinutes !== a.sharedStayMinutes) return b.sharedStayMinutes - a.sharedStayMinutes;
+      return a.combinedPrice - b.combinedPrice;
+    }
+    if (sortBy === 'price') {
+      return a.combinedPrice - b.combinedPrice;
+    }
+    if (sortBy === 'sincronia') {
+      return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
+    }
+
+    // Padrão: sincronia_total
+    if (b.sharedStayMinutes !== a.sharedStayMinutes) return b.sharedStayMinutes - a.sharedStayMinutes;
+    if (a.arrivalDeltaMinutes !== b.arrivalDeltaMinutes) return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
     return a.combinedPrice - b.combinedPrice;
   });
 
   if (combinedResults.length === 0) {
-    const p1Array = Array.isArray(person1Flights) ? person1Flights : [];
-    const p2Array = Array.isArray(person2Flights) ? person2Flights : [];
-
     const getPersonDiag = (orig, flightsArray) => {
       if (flightsArray.length > 0) {
         const prices = flightsArray.map(f => f.totalPrice).filter(p => typeof p === 'number' && !isNaN(p) && p > 0);
@@ -983,12 +1067,15 @@ export async function searchCombinedFlights({
     const diagnostics = {
       person1: { origin: origin1, destination, ...getPersonDiag(origin1, p1Array) },
       person2: { origin: origin2, destination, ...getPersonDiag(origin2, p2Array) },
-      summaryReason: `Como um dos viajantes não encontrou opções de voo no período, não foi possível sincronizar nenhuma viagem combinada do casal.`
+      summaryReason: `Nenhuma combinação atendeu aos critérios de filtro selecionados.`
     };
 
-    return { status: 'completed', results: [], diagnostics };
+    return { status: 'completed', results: [], diagnostics, allAvailableDates, allAvailableReturnDates };
   }
 
-  // Limitar as melhores 5000 opções para evitar estouro de memória e lentidão de carregamento
-  return combinedResults.slice(0, 5000);
+  return {
+    results: combinedResults.slice(0, 5000),
+    allAvailableDates,
+    allAvailableReturnDates
+  };
 }

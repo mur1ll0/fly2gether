@@ -110,7 +110,7 @@ export default function SmartDatePreview({
           holidayCandidates.push({
             dep: friPrev.toISOString().split('T')[0],
             ret: dateStr,
-            depDay: 'Sexta (noite)',
+            depDay: 'Sexta-feira',
             retDay: 'Segunda (feriado)',
             holidayName: holiday.name
           });
@@ -140,7 +140,7 @@ export default function SmartDatePreview({
           holidayCandidates.push({
             dep: thuPrev.toISOString().split('T')[0],
             ret: sunNext.toISOString().split('T')[0],
-            depDay: 'Quinta (noite)',
+            depDay: 'Quinta (Véspera)',
             retDay: 'Domingo',
             holidayName: holiday.name
           });
@@ -231,13 +231,17 @@ export default function SmartDatePreview({
 
       {onlyWeekends && (
         <div className="space-y-3">
+          <div className="p-2.5 bg-amber-500/10 border border-amber-500/25 rounded-lg text-amber-300 text-xs font-semibold flex items-center space-x-2">
+            <span>🌙 <strong>Busca Inteligente a Noite:</strong> Todas as partidas de ida para Finais de Semana e Feriados buscam saídas à noite (a partir das 19h) na véspera ou na sexta-feira.</span>
+          </div>
+
           {/* Feriados Prolongados e Emendas */}
           {smartSchedule.holidayCandidates.length > 0 && (
             <div>
               <div className="flex items-center space-x-1.5 mb-2">
                 <Flame className="w-3.5 h-3.5 text-amber-400" />
                 <span className="text-xs font-semibold text-slate-200">
-                  Feriados Nacionais Próximos (Ida Sexta/Sábado ➔ Volta no Feriado ou Domingo):
+                  Feriados Nacionais Próximos (Ida Quinta/Sexta ➔ Volta no Feriado ou Domingo):
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">

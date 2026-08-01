@@ -40,6 +40,9 @@ export default function App() {
   const [selectedAirlines, setSelectedAirlines] = useState(['LA', 'G3', 'AD', 'TP', 'CM']);
   const [stopsFilter, setStopsFilter] = useState('all'); // 'all', 'direct', 'stops'
   const [hideTransfers, setHideTransfers] = useState(false);
+  const [fridayNightOnly, setFridayNightOnly] = useState(false);
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [selectedReturnDates, setSelectedReturnDates] = useState([]);
   const [toleranceIndex, setToleranceIndex] = useState(3); // Default to 3 (1h)
 
   // Results, Loading, SerpAPI Quota & Cancel Trigger
@@ -61,6 +64,8 @@ export default function App() {
   const [scrapingProgress, setScrapingProgress] = useState({ completed: 0, total: 0 });
   const [hasSearched, setHasSearched] = useState(false);
   const [searchDiagnostics, setSearchDiagnostics] = useState(null);
+  const [serverAvailableDates, setServerAvailableDates] = useState([]);
+  const [serverAvailableReturnDates, setServerAvailableReturnDates] = useState([]);
 
   const isQuotaExceeded = serpApiUsage && serpApiUsage.enabled && (
     (serpApiUsage.total_searches_left !== undefined && serpApiUsage.total_searches_left <= 0) ||
@@ -248,7 +253,14 @@ export default function App() {
         vacationStart,
         vacationEnd,
         durationDays,
-        useLiveApi
+        useLiveApi,
+        selectedAirlines: selectedAirlines.join(','),
+        stopsFilter,
+        hideTransfers: hideTransfers ? 'true' : 'false',
+        toleranceIndex,
+        selectedDates: selectedDates.join(','),
+        selectedReturnDates: selectedReturnDates.join(','),
+        sortBy
       };
 
       const res = await API.get('/flights/search', {
@@ -270,6 +282,12 @@ export default function App() {
       } else {
         setResults(Array.isArray(res.data?.results) ? res.data.results : []);
         setSearchDiagnostics(res.data?.diagnostics || null);
+        if (res.data?.allAvailableDates) {
+          setServerAvailableDates(res.data.allAvailableDates);
+        }
+        if (res.data?.allAvailableReturnDates) {
+          setServerAvailableReturnDates(res.data.allAvailableReturnDates);
+        }
         setScrapingMessage('');
         setScrapingProgress({ completed: 0, total: 0 });
         setLoading(false);
@@ -364,6 +382,44 @@ export default function App() {
     setIsDrawerOpen(true);
   };
 
+  // Extrair todas as datas de ida únicas disponíveis nos resultados da busca
+  const availableDates = useMemo(() => {
+    if (serverAvailableDates && serverAvailableDates.length > 0) {
+      return serverAvailableDates;
+    }
+    const safeResults = Array.isArray(results) ? results : [];
+    const dates = new Set();
+    safeResults.forEach(item => {
+      const depDate = item.departureDate || item.person1?.departureDate;
+      if (depDate) dates.add(depDate);
+    });
+    return Array.from(dates).sort();
+  }, [results, serverAvailableDates]);
+
+  // Extrair todas as datas de volta únicas disponíveis nos resultados da busca
+  const availableReturnDates = useMemo(() => {
+    if (serverAvailableReturnDates && serverAvailableReturnDates.length > 0) {
+      return serverAvailableReturnDates;
+    }
+    const safeResults = Array.isArray(results) ? results : [];
+    const dates = new Set();
+    safeResults.forEach(item => {
+      const retDate = item.returnDate || item.person1?.returnDate;
+      if (retDate) dates.add(retDate);
+    });
+    return Array.from(dates).sort();
+  }, [results, serverAvailableReturnDates]);
+
+  // Refetch automático quando filtros mudam se a busca já estiver ativa
+  useEffect(() => {
+    if (hasSearched && !loading) {
+      const timer = setTimeout(() => {
+        handleSearch();
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDates, selectedReturnDates, selectedAirlines, stopsFilter, hideTransfers, toleranceIndex, sortBy]);
+
   // Checar se há resultados provenientes de cache expirado (SWR em revalidação)
   const hasStaleResults = useMemo(() => {
     const safeResults = Array.isArray(results) ? results : [];
@@ -430,6 +486,12 @@ export default function App() {
               item.returnHasAirportTransfer
             ) return false;
           }
+        }
+
+        // Filtro por Datas Selecionadas (Multi-select)
+        if (selectedDates.length > 0) {
+          const itemDepDate = item.departureDate || item.person1?.departureDate;
+          if (!itemDepDate || !selectedDates.includes(itemDepDate)) return false;
         }
 
         // Filtro de Tolerância de Horários no modo Fly Together
@@ -817,6 +879,12 @@ export default function App() {
               setStopsFilter={setStopsFilter}
               hideTransfers={hideTransfers}
               setHideTransfers={setHideTransfers}
+              selectedDates={selectedDates}
+              setSelectedDates={setSelectedDates}
+              availableDates={availableDates}
+              selectedReturnDates={selectedReturnDates}
+              setSelectedReturnDates={setSelectedReturnDates}
+              availableReturnDates={availableReturnDates}
               searchMode={searchMode}
               toleranceIndex={toleranceIndex}
               setToleranceIndex={setToleranceIndex}
