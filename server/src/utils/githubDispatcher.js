@@ -7,29 +7,30 @@ let lastDispatchTimestamp = 0;
  * Dispara UMA ÚNICA execução em lote (1 Runner) no GitHub Actions para processar todas as pernas pendentes no MongoDB
  */
 export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null) {
-  const token = process.env.GITHUB_PAT;
-  const repo = process.env.GITHUB_REPO; // Format: "owner/repo"
+  const token = process.env.GITHUB_PAT || process.env.GH_PAT || process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPO || process.env.GH_REPO || 'mur1ll0/fly2gether';
+
+  console.log('[CONFIG] 🔍 Verificando credenciais e disponibilidade do robô de busca...');
 
   if (!token || !repo) {
-    console.warn('⚠️ GITHUB_PAT ou GITHUB_REPO não configurado no .env. O disparo para o GitHub foi ignorado.');
+    console.warn('[CONFIG] ⚠️ GITHUB_PAT ou GITHUB_REPO não configurado. O disparo para o robô foi ignorado.');
     return false;
   }
 
   // Se um disparo foi feito nos últimos 10 segundos para esta instância, reutiliza o runner que já está rodando
   const now = Date.now();
   if (now - lastDispatchTimestamp < 10000) {
-    console.log('ℹ️ [GitHub Dispatch] Um Runner já foi ativado recentemente (< 10s). Reutilizando a execução na nuvem.');
+    console.log('[CONFIG] ℹ️ Um robô de busca já foi ativado recentemente (< 10s). Reutilizando a execução ativa na nuvem.');
     return true;
   }
-  lastDispatchTimestamp = now;
 
   try {
     const url = `https://api.github.com/repos/${repo}/dispatches`;
     const origStr = origin ? origin.toUpperCase() : 'BATCH';
     const destStr = destination ? destination.toUpperCase() : 'BATCH';
-    console.log(`🌐 [GitHub Dispatch] Disparando 1 Runner Único no GitHub Actions para processar pernas de: ${origStr} ➔ ${destStr}`);
+    console.log(`[CONFIG] 🌐 Conectando à nuvem para iniciar raspagem da rota: ${origStr} ➔ ${destStr}...`);
 
-    await axios.post(
+    const response = await axios.post(
       url,
       {
         event_type: 'scrape-batch',
@@ -51,10 +52,14 @@ export async function triggerGithubScraper(origin = null, destination = null, de
       }
     );
 
-    console.log('✅ [GitHub Dispatch] 1 Runner em lote do GitHub Actions ativado com sucesso!');
+    // Atualiza a trava de memória somente APÓS sucesso HTTP 2xx (status 204)
+    lastDispatchTimestamp = Date.now();
+
+    console.log(`[CONFIG] ✅ Conexão com GitHub Actions estabelecida com sucesso! Workflow de raspagem iniciado para ${origStr} ➔ ${destStr}. (Status API: ${response.status})`);
     return true;
   } catch (error) {
-    console.error('❌ [GitHub Dispatch] Erro ao disparar o GitHub Actions:', error.response?.data || error.message);
+    console.error('[CONFIG] ❌ Falha na comunicação com o GitHub API:', error.response?.data || error.message);
     return false;
   }
 }
+

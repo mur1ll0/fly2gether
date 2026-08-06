@@ -1,6 +1,7 @@
-import React from 'react';
-import { ArrowUpDown, Filter, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowUpDown, Filter, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import DateMultiSelectDropdown from './DateMultiSelectDropdown';
+import DateTimeFilterGroup from './DateTimeFilterGroup';
 
 export const TOLERANCE_STEPS = [
   { value: 0, label: '0m (Exato)' },
@@ -38,22 +39,22 @@ export default function FilterSortBar({
   availableReturnDates = [],
   searchMode,
   toleranceIndex,
-  setToleranceIndex
+  setToleranceIndex,
+  person1Name = 'Pessoa 1',
+  person2Name = 'Pessoa 2',
+  timeFilters = {},
+  setTimeFilters = () => {}
 }) {
+  const [showTimeFilters, setShowTimeFilters] = useState(false);
+
+  const activeTimeFilterCount = Object.keys(timeFilters).filter(k => !!timeFilters[k]).length;
+
   const toggleAirline = (code) => {
     if (selectedAirlines.includes(code)) {
       if (selectedAirlines.length === 1) return; // manter ao menos uma selecionada
       setSelectedAirlines(selectedAirlines.filter(c => c !== code));
     } else {
       setSelectedAirlines([...selectedAirlines, code]);
-    }
-  };
-
-  const toggleDate = (dateStr) => {
-    if (selectedDates.includes(dateStr)) {
-      setSelectedDates(selectedDates.filter(d => d !== dateStr));
-    } else {
-      setSelectedDates([...selectedDates, dateStr]);
     }
   };
 
@@ -135,8 +136,6 @@ export default function FilterSortBar({
             </select>
           </div>
 
-
-
           {/* Checkbox para ocultar troca de aeroporto */}
           <div className="flex items-center">
             <label className="flex items-center space-x-2 cursor-pointer text-xs font-bold text-slate-300 uppercase tracking-wider bg-slate-950/45 px-3 py-1.5 border border-slate-800 rounded-xl hover:border-slate-700 transition-all select-none">
@@ -149,10 +148,38 @@ export default function FilterSortBar({
               <span>Ocultar Troca de Aeroporto</span>
             </label>
           </div>
+
+          {/* Botão de Horários Específicos */}
+          <button
+            type="button"
+            onClick={() => setShowTimeFilters(!showTimeFilters)}
+            className={`flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+              showTimeFilters || activeTimeFilterCount > 0
+                ? 'bg-brand-500/20 text-brand-300 border-brand-500/40 ring-1 ring-brand-500/30'
+                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-brand-400" />
+            <span>Filtros de Horário {activeTimeFilterCount > 0 && `(${activeTimeFilterCount})`}</span>
+            {showTimeFilters ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
+          </button>
         </div>
       </div>
 
-      {/* Segunda linha: Filtro por Datas de Ida e Volta em Dropdowns */}
+      {/* Segunda linha: Horários Específicos (Expandível) */}
+      {showTimeFilters && (
+        <div className="border-t border-slate-800/80 pt-3 animate-fadeIn">
+          <DateTimeFilterGroup
+            searchMode={searchMode}
+            person1Name={person1Name}
+            person2Name={person2Name}
+            timeFilters={timeFilters}
+            setTimeFilters={setTimeFilters}
+          />
+        </div>
+      )}
+
+      {/* Terceira linha: Filtro por Datas de Ida e Volta em Dropdowns */}
       {((availableDates && availableDates.length > 0) || (availableReturnDates && availableReturnDates.length > 0)) && (
         <div className="border-t border-slate-800/80 pt-3 flex flex-wrap items-center gap-6">
           {availableDates && availableDates.length > 0 && (
@@ -176,7 +203,7 @@ export default function FilterSortBar({
         </div>
       )}
 
-      {/* Terceira linha: Tolerância de Sincronia no modo Fly Together */}
+      {/* Quarta linha: Tolerância de Sincronia no modo Fly Together */}
       {searchMode === 'flytogether' && (
         <div className="border-t border-slate-800/80 pt-4 mt-1 flex flex-col md:flex-row md:items-center gap-4 pb-2">
           <div className="flex items-center space-x-2 shrink-0">

@@ -473,11 +473,32 @@ function processLocalScrapeQueue() {
   });
 }
 
+function isTimeInWindow(timeStr, minTime, maxTime) {
+  if (!timeStr) return true;
+  if (!minTime && !maxTime) return true;
+  try {
+    const [h, m] = timeStr.split(':').map(Number);
+    const minutes = h * 60 + (m || 0);
+
+    if (minTime) {
+      const [minH, minM] = minTime.split(':').map(Number);
+      if (minutes < minH * 60 + (minM || 0)) return false;
+    }
+    if (maxTime) {
+      const [maxH, maxM] = maxTime.split(':').map(Number);
+      if (minutes > maxH * 60 + (maxM || 0)) return false;
+    }
+  } catch (e) {
+    return true;
+  }
+  return true;
+}
+
 // Resolve voos de perna única (One-Way) usando Cache unificado + SWR + Scraper Local/Nuvem
 async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
 
   // 1. Tentar encontrar no Cache do MongoDB
   const cached = await FlightCache.findOne({
@@ -494,6 +515,14 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
         const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
         if (isLocal) {
           triggerLocalScrape(originUpper, destUpper, date);
+        } else {
+          // Em produção (Vercel), re-triga periodicamente o robô a cada 30s se o polling continuar pendente
+          const triggerKey = `${originUpper}-${destUpper}`;
+          if (!recentlyTriggered.has(triggerKey)) {
+            recentlyTriggered.add(triggerKey);
+            setTimeout(() => recentlyTriggered.delete(triggerKey), 30000);
+            triggerGithubScraper(originUpper, destUpper, date).catch(() => {});
+          }
         }
 
         return {
@@ -574,7 +603,7 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
 async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi }) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
 
   // Caso 1: Modo API Paga (Tratamento unificado com cache)
   if (returnDate && useLiveApi) {
@@ -662,7 +691,8 @@ export async function searchSingleFlights({
   hideTransfers = false,
   selectedDates,
   selectedReturnDates,
-  sortBy = 'price'
+  sortBy = 'price',
+  timeFilters = {}
 }) {
   const boolLive = useLiveApi === 'true' || useLiveApi === true;
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
@@ -773,6 +803,13 @@ export async function searchSingleFlights({
         if (stopsFilter === 'stops' && flight.stopsCount === 0 && (flight.returnStopsCount || 0) === 0) return;
         if (boolHideTransfers && (flight.hasAirportTransfer || flight.returnHasAirportTransfer)) return;
 
+        // Filtros de Horários Pessoais / Perna Única
+        const tf = timeFilters || {};
+        if (!isTimeInWindow(flight.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return;
+        if (!isTimeInWindow(flight.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return;
+        if (!isTimeInWindow(flight.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return;
+        if (!isTimeInWindow(flight.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return;
+
         let isNight = true;
         if (flight.departureTime) {
           const [h] = flight.departureTime.split(':').map(Number);
@@ -840,7 +877,8 @@ export async function searchCombinedFlights({
   toleranceIndex,
   selectedDates,
   selectedReturnDates,
-  sortBy = 'sincronia_total'
+  sortBy = 'sincronia_total',
+  timeFilters = {}
 }) {
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
   const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
@@ -919,6 +957,19 @@ export async function searchCombinedFlights({
         if (boolHideTransfers) {
           if (f1.hasAirportTransfer || f1.returnHasAirportTransfer || f2.hasAirportTransfer || f2.returnHasAirportTransfer) continue;
         }
+
+        // 4.5. Filtros de Horários Específicos para Pessoa 1 e Pessoa 2
+        const tf = timeFilters || {};
+        // Pessoa 1
+        if (!isTimeInWindow(f1.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) continue;
+        if (!isTimeInWindow(f1.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) continue;
+        if (!isTimeInWindow(f1.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) continue;
+        if (!isTimeInWindow(f1.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) continue;
+        // Pessoa 2
+        if (!isTimeInWindow(f2.departureTime, tf.p2DepTimeMin, tf.p2DepTimeMax)) continue;
+        if (!isTimeInWindow(f2.arrivalTime, tf.p2ArrTimeMin, tf.p2ArrTimeMax)) continue;
+        if (!isTimeInWindow(f2.returnDepartureTime, tf.p2RetDepTimeMin, tf.p2RetDepTimeMax)) continue;
+        if (!isTimeInWindow(f2.returnArrivalTime, tf.p2RetArrTimeMin, tf.p2RetArrTimeMax)) continue;
 
         // 5. Filtro por Tolerância de Sincronia de Pouso/Decolagem
         const [h1, m1] = f1.arrivalTime.split(':').map(Number);

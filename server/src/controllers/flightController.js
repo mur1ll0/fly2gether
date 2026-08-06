@@ -24,13 +24,26 @@ export async function handleSearchFlights(req, res) {
       toleranceIndex,
       selectedDates,
       selectedReturnDates,
-      sortBy
+      sortBy,
+      // Filtros de Horário Pessoa 1
+      p1DepTimeMin, p1DepTimeMax, p1ArrTimeMin, p1ArrTimeMax,
+      p1RetDepTimeMin, p1RetDepTimeMax, p1RetArrTimeMin, p1RetArrTimeMax,
+      // Filtros de Horário Pessoa 2 (Fly Together)
+      p2DepTimeMin, p2DepTimeMax, p2ArrTimeMin, p2ArrTimeMax,
+      p2RetDepTimeMin, p2RetDepTimeMax, p2RetArrTimeMin, p2RetArrTimeMax
     } = req.query;
 
     const boolWeekends = onlyWeekends === 'true' || onlyWeekends === true;
     const boolVacation = isVacation === 'true' || isVacation === true;
     const parsedDuration = parseInt(durationDays) || 4;
     const boolLive = useLiveApi === 'true' || useLiveApi === true;
+
+    const timeFilters = {
+      p1DepTimeMin, p1DepTimeMax, p1ArrTimeMin, p1ArrTimeMax,
+      p1RetDepTimeMin, p1RetDepTimeMax, p1RetArrTimeMin, p1RetArrTimeMax,
+      p2DepTimeMin, p2DepTimeMax, p2ArrTimeMin, p2ArrTimeMax,
+      p2RetDepTimeMin, p2RetDepTimeMax, p2RetArrTimeMin, p2RetArrTimeMax
+    };
 
     if (mode === 'flytogether') {
       const orig1 = origin1 || origin;
@@ -56,7 +69,8 @@ export async function handleSearchFlights(req, res) {
         toleranceIndex,
         selectedDates,
         selectedReturnDates,
-        sortBy
+        sortBy,
+        timeFilters
       });
 
       if (results && results.status === 'scraping') {
@@ -99,7 +113,8 @@ export async function handleSearchFlights(req, res) {
         toleranceIndex,
         selectedDates,
         selectedReturnDates,
-        sortBy
+        sortBy,
+        timeFilters
       });
 
       if (results && results.status === 'scraping') {

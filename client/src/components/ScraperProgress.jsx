@@ -46,6 +46,12 @@ export default function ScraperProgress({
         )}
       </div>
 
+      {/* Estimativa Amigável de Tempo de Espera */}
+      <div className="flex items-center justify-center space-x-2 py-2 px-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-semibold">
+        <Sparkles className="w-4 h-4 text-amber-400 flex-shrink-0 animate-pulse" />
+        <span>⏳ Nosso robô está minerando as melhores combinações na nuvem. A busca leva em média de 2 a 5 minutos e atualiza automaticamente!</span>
+      </div>
+
       {/* Progress Bar Container */}
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs font-semibold">
@@ -78,14 +84,14 @@ export default function ScraperProgress({
             <Flame className="w-4 h-4 text-amber-400 animate-pulse" />
             <span>{totalOffersFound} voos catalogados até agora nesta busca</span>
           </div>
-          <span className="text-[10px] text-slate-500 font-mono">MongoDB Sync</span>
+          <span className="text-[10px] text-slate-400 font-medium">Sincronizando em tempo real</span>
         </div>
 
         <div className="flex items-start space-x-2.5">
           <RefreshCw className="w-4 h-4 text-brand-400 animate-spin mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <p className="text-xs font-semibold text-slate-200 leading-snug">
-              {scrapingMessage || 'Coletando trechos aéreos no Google Flights...'}
+              {scrapingMessage || 'Buscando e comparando tarifas de voos em tempo real...'}
             </p>
           </div>
         </div>

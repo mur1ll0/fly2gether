@@ -66,6 +66,7 @@ export default function App() {
   const [searchDiagnostics, setSearchDiagnostics] = useState(null);
   const [serverAvailableDates, setServerAvailableDates] = useState([]);
   const [serverAvailableReturnDates, setServerAvailableReturnDates] = useState([]);
+  const [timeFilters, setTimeFilters] = useState({});
 
   const isQuotaExceeded = serpApiUsage && serpApiUsage.enabled && (
     (serpApiUsage.total_searches_left !== undefined && serpApiUsage.total_searches_left <= 0) ||
@@ -260,7 +261,8 @@ export default function App() {
         toleranceIndex,
         selectedDates: selectedDates.join(','),
         selectedReturnDates: selectedReturnDates.join(','),
-        sortBy
+        sortBy,
+        ...timeFilters
       };
 
       const res = await API.get('/flights/search', {
@@ -888,6 +890,10 @@ export default function App() {
               searchMode={searchMode}
               toleranceIndex={toleranceIndex}
               setToleranceIndex={setToleranceIndex}
+              person1Name={origin1?.city || origin1?.iata || 'Pessoa 1'}
+              person2Name={origin2?.city || origin2?.iata || 'Pessoa 2'}
+              timeFilters={timeFilters}
+              setTimeFilters={setTimeFilters}
             />
           )}
 

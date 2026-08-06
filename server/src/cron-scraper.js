@@ -220,8 +220,8 @@ async function runScraperJob() {
   const workerFn = async (task, taskIdx) => {
     log(`[Progresso ${taskIdx+1}/${tasks.length}] Iniciando processamento: ${task.origin} ➔ ${task.destination} em ${task.departureDate}`);
     try {
-      // 1. Checa se o cache no banco de dados já possui registro recente (< 12h) e concluído
-      const freshThreshold = new Date(Date.now() - 12 * 60 * 60 * 1000);
+      // 1. Checa se o cache no banco de dados já possui registro recente (< 8h) e concluído
+      const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
       const existingCache = await FlightCache.findOne({
         origin: task.origin,
         destination: task.destination,
