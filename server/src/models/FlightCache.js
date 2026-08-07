@@ -13,8 +13,7 @@ const FlightCacheSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'completed'], default: 'completed' }
 });
 
-// Index to optimize lookups por rota e por searchHash
-FlightCacheSchema.index({ searchHash: 1 });
+// Index to optimize lookups por rota
 FlightCacheSchema.index({ origin: 1, destination: 1, departureDate: 1, returnDate: 1 });
 
 // TTL index: automaticamente expira e exclui registros após 2 horas (7200 segundos)

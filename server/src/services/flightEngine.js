@@ -914,9 +914,6 @@ export async function searchCombinedFlights(params) {
   };
 }
 
-  const p1Array = Array.isArray(person1Flights) ? person1Flights : [];
-  const p2Array = Array.isArray(person2Flights) ? person2Flights : [];
-
 function combineFlightsForCouple(p1Array, p2Array, toleranceMinutes, airlinesList = [], boolHideTransfers = false, stopsFilter = 'all', datesList = [], returnDatesList = [], timeFilters = {}, sortBy = 'sincronia_total') {
   const combinedResults = [];
 
