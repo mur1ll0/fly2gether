@@ -95,17 +95,18 @@ function getFlexibleDates() {
 }
 
 /**
- * Adiciona uma rota + data na lista de tarefas únicas
+ * Adiciona uma rota + data na lista de tarefas únicas (suporta Ida e Volta)
  */
-function queueTask(tasks, origin, destination, departureDate) {
+function queueTask(tasks, origin, destination, departureDate, returnDate = null) {
   if (!departureDate || !origin || !destination) return;
   
-  const key = `${origin.toUpperCase()}-${destination.toUpperCase()}-${departureDate}`;
+  const key = `${origin.toUpperCase()}-${destination.toUpperCase()}-${departureDate}-${returnDate || ''}`;
   if (!tasks.has(key)) {
     tasks.set(key, {
       origin: origin.toUpperCase(),
       destination: destination.toUpperCase(),
-      departureDate
+      departureDate,
+      returnDate
     });
   }
 }
@@ -133,11 +134,7 @@ async function runScraperJob() {
 
   if (argOrigin && argDest && argDepDate) {
     log(`Modo Direto: Raspando rota ${argOrigin} ➔ ${argDest} | Ida: ${argDepDate} | Volta: ${argRetDate || 'N/A'}`);
-    queueTask(tasksMap, argOrigin, argDest, argDepDate);
-    if (argRetDate) {
-      // Inverte para a volta
-      queueTask(tasksMap, argDest, argOrigin, argRetDate);
-    }
+    queueTask(tasksMap, argOrigin, argDest, argDepDate, argRetDate);
   } else {
     // Caso 2: Execução agendada normal (Lê todos os alertas ativos no banco)
     log('Modo Agendado: Lendo alertas ativos do MongoDB...');
@@ -202,7 +199,7 @@ async function runScraperJob() {
 
     log(`Encontrados ${pendingCaches.length} caches de busca pendentes para revalidação.`);
     for (const cache of pendingCaches) {
-      queueTask(tasksMap, cache.origin, cache.destination, cache.departureDate);
+      queueTask(tasksMap, cache.origin, cache.destination, cache.departureDate, cache.returnDate);
     }
   }
 
@@ -240,7 +237,8 @@ async function runScraperJob() {
       const flightsList = await scrapeGoogleFlights({
         origin: task.origin,
         destination: task.destination,
-        departureDate: task.departureDate
+        departureDate: task.departureDate,
+        returnDate: task.returnDate
       });
 
       // 3. Salva ou atualiza os resultados no banco
@@ -249,7 +247,7 @@ async function runScraperJob() {
           origin: task.origin,
           destination: task.destination,
           departureDate: task.departureDate,
-          returnDate: null
+          returnDate: task.returnDate || null
         },
         {
           flights: flightsList || [],
