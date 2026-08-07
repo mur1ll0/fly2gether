@@ -18,6 +18,7 @@ export async function handleSearchFlights(req, res) {
       vacationEnd,
       durationDays,
       useLiveApi,
+      forceRefresh,
       selectedAirlines,
       stopsFilter,
       hideTransfers,
@@ -37,6 +38,7 @@ export async function handleSearchFlights(req, res) {
     const boolVacation = isVacation === 'true' || isVacation === true;
     const parsedDuration = parseInt(durationDays) || 4;
     const boolLive = useLiveApi === 'true' || useLiveApi === true;
+    const boolForceRefresh = forceRefresh === 'true' || forceRefresh === true;
 
     const timeFilters = {
       p1DepTimeMin, p1DepTimeMax, p1ArrTimeMin, p1ArrTimeMax,
@@ -63,6 +65,7 @@ export async function handleSearchFlights(req, res) {
         vacationEnd,
         durationDays: parsedDuration,
         useLiveApi: boolLive,
+        forceRefresh: boolForceRefresh,
         selectedAirlines,
         stopsFilter,
         hideTransfers,
@@ -107,6 +110,7 @@ export async function handleSearchFlights(req, res) {
         vacationEnd,
         durationDays: parsedDuration,
         useLiveApi: boolLive,
+        forceRefresh: boolForceRefresh,
         selectedAirlines,
         stopsFilter,
         hideTransfers,

@@ -80,12 +80,17 @@ function getAirlineDetails(airlineText) {
 }
 
 /**
- * Executa o processo de scraping de voos (Trecho Único / One-Way)
+ * Executa o processo de scraping de voos (Suporta Trecho Único / One-Way e Ida e Volta / Round-Trip)
  */
-export async function scrapeGoogleFlights({ origin, destination, departureDate }) {
-  const url = `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origin.toUpperCase()}%20para%20${destination.toUpperCase()}%20em%20${departureDate}`;
+export async function scrapeGoogleFlights({ origin, destination, departureDate, returnDate = null }) {
+  const origUpper = origin.toUpperCase();
+  const destUpper = destination.toUpperCase();
   
-  log(`Iniciando raspagem para Rota: ${origin.toUpperCase()} ➔ ${destination.toUpperCase()} | Data: ${departureDate}`);
+  const url = returnDate 
+    ? `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origUpper}%20para%20${destUpper}%20de%20${departureDate}%20a%20${returnDate}`
+    : `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origUpper}%20para%20${destUpper}%20em%20${departureDate}`;
+  
+  log(`Iniciando raspagem para Rota: ${origUpper} ➔ ${destUpper} | Ida: ${departureDate} | Volta: ${returnDate || 'N/A'}`);
   const tmpDir = os.tmpdir();
   const userDataDir = fs.mkdtempSync(path.join(tmpDir, 'puppeteer_profile_'));
 

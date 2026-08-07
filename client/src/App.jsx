@@ -67,6 +67,7 @@ export default function App() {
   const [serverAvailableDates, setServerAvailableDates] = useState([]);
   const [serverAvailableReturnDates, setServerAvailableReturnDates] = useState([]);
   const [timeFilters, setTimeFilters] = useState({});
+  const [forceRefresh, setForceRefresh] = useState(false);
 
   const isQuotaExceeded = serpApiUsage && serpApiUsage.enabled && (
     (serpApiUsage.total_searches_left !== undefined && serpApiUsage.total_searches_left <= 0) ||
@@ -262,6 +263,7 @@ export default function App() {
         selectedDates: selectedDates.join(','),
         selectedReturnDates: selectedReturnDates.join(','),
         sortBy,
+        forceRefresh: forceRefresh ? 'true' : 'false',
         ...timeFilters
       };
 
@@ -490,31 +492,41 @@ export default function App() {
           }
         }
 
-        // Filtro por Datas Selecionadas (Multi-select)
-        if (selectedDates.length > 0) {
-          const itemDepDate = item.departureDate || item.person1?.departureDate;
-          if (!itemDepDate || !selectedDates.includes(itemDepDate)) return false;
-        }
-
-        // Filtro de Tolerância de Horários no modo Fly Together
-        if (searchMode === 'flytogether') {
-          const limit = TOLERANCE_STEPS[toleranceIndex]?.value;
-          if (limit !== undefined && limit !== Infinity) {
-            let returnDepartureDelta = 0;
-            let hasReturn = false;
-            if (item.person1?.returnDepartureTime && item.person2?.returnDepartureTime) {
-              const [h1, m1] = item.person1.returnDepartureTime.split(':').map(Number);
-              const [h2, m2] = item.person2.returnDepartureTime.split(':').map(Number);
-              returnDepartureDelta = Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
-              hasReturn = true;
+        // Filtro de Horários Pessoais (Frontend Instantâneo)
+        const tf = timeFilters || {};
+        const checkTime = (timeStr, minT, maxT) => {
+          if (!timeStr) return true;
+          if (!minT && !maxT) return true;
+          try {
+            const [h, m] = timeStr.split(':').map(Number);
+            const mins = h * 60 + (m || 0);
+            if (minT) {
+              const [minH, minM] = minT.split(':').map(Number);
+              if (mins < minH * 60 + (minM || 0)) return false;
             }
-            // Média de discrepância entre os trechos ativos
-            const averageDelta = hasReturn 
-              ? (item.arrivalDeltaMinutes + returnDepartureDelta) / 2 
-              : item.arrivalDeltaMinutes;
+            if (maxT) {
+              const [maxH, maxM] = maxT.split(':').map(Number);
+              if (mins > maxH * 60 + (maxM || 0)) return false;
+            }
+          } catch (e) { return true; }
+          return true;
+        };
 
-            if (averageDelta > limit) return false;
-          }
+        if (searchMode === 'flytogether') {
+          if (!checkTime(item.person1?.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return false;
+          if (!checkTime(item.person1?.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return false;
+          if (!checkTime(item.person1?.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return false;
+          if (!checkTime(item.person1?.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return false;
+
+          if (!checkTime(item.person2?.departureTime, tf.p2DepTimeMin, tf.p2DepTimeMax)) return false;
+          if (!checkTime(item.person2?.arrivalTime, tf.p2ArrTimeMin, tf.p2ArrTimeMax)) return false;
+          if (!checkTime(item.person2?.returnDepartureTime, tf.p2RetDepTimeMin, tf.p2RetDepTimeMax)) return false;
+          if (!checkTime(item.person2?.returnArrivalTime, tf.p2RetArrTimeMin, tf.p2RetArrTimeMax)) return false;
+        } else {
+          if (!checkTime(item.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return false;
+          if (!checkTime(item.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return false;
+          if (!checkTime(item.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return false;
+          if (!checkTime(item.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return false;
         }
 
         return true;
@@ -581,7 +593,7 @@ export default function App() {
   // Resetar página atual de paginação ao alterar qualquer critério de filtragem ou ordenação
   useEffect(() => {
     setCurrentPage(1);
-  }, [results, selectedAirlines, stopsFilter, hideTransfers, sortBy, toleranceIndex]);
+  }, [results, selectedAirlines, stopsFilter, hideTransfers, sortBy, toleranceIndex, timeFilters]);
 
   const PAGE_SIZE = 100;
 
@@ -788,6 +800,19 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* Toggle para Forçar Consulta Quente (Ignorar Cache) */}
+              <div className="flex items-center space-x-2 bg-slate-950/80 px-3.5 py-2 rounded-xl border border-slate-800 shrink-0">
+                <label className="flex items-center space-x-2 text-xs font-semibold text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={forceRefresh}
+                    onChange={(e) => setForceRefresh(e.target.checked)}
+                    className="rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span>🔥 Forçar Consulta Quente (Ignorar Cache)</span>
+                </label>
+              </div>
             </div>
 
             {/* Submit & Cancel Buttons */}
@@ -871,7 +896,7 @@ export default function App() {
           </div>
 
           {/* Interactive Sorting & Filtering Controls Bar */}
-          {results.length > 0 && (
+          {(hasSearched || results.length > 0) && (
             <FilterSortBar
               sortBy={sortBy}
               setSortBy={setSortBy}

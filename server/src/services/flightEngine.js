@@ -495,13 +495,18 @@ function isTimeInWindow(timeStr, minTime, maxTime) {
 }
 
 // Resolve voos de perna única (One-Way) usando Cache unificado + SWR + Scraper Local/Nuvem
-async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
+async function resolveOneWayLeg(origin, destination, date, useLiveApi = false, forceRefresh = false) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
   const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
 
-  // 1. Tentar encontrar no Cache do MongoDB
-  const cached = await FlightCache.findOne({
+  if (forceRefresh) {
+    console.log(`[Force Refresh] Ignorando e limpando cache existente para ${originUpper}➔${destUpper} em ${date}`);
+    await FlightCache.deleteOne({ origin: originUpper, destination: destUpper, departureDate: date, returnDate: null });
+  }
+
+  // 1. Tentar encontrar no Cache do MongoDB (se não for forceRefresh)
+  const cached = forceRefresh ? null : await FlightCache.findOne({
     origin: originUpper,
     destination: destUpper,
     departureDate: date,
@@ -600,14 +605,17 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false) {
 }
 
 // Resolve o par de voos (Ida + Volta)
-async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi }) {
+async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi, forceRefresh = false }) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
   const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
 
   // Caso 1: Modo API Paga (Tratamento unificado com cache)
   if (returnDate && useLiveApi) {
-    const cached = await FlightCache.findOne({
+    if (forceRefresh) {
+      await FlightCache.deleteOne({ origin: originUpper, destination: destUpper, departureDate, returnDate });
+    }
+    const cached = forceRefresh ? null : await FlightCache.findOne({
       origin: originUpper,
       destination: destUpper,
       departureDate,
@@ -647,8 +655,8 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
 
   // Caso 2: Modo Robô Econômico (Combina duas pernas raspadas de ida e volta)
   if (returnDate && !useLiveApi) {
-    const outboundFlights = await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi);
-    const inboundFlights = await resolveOneWayLeg(destUpper, originUpper, returnDate, useLiveApi);
+    const outboundFlights = await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi, forceRefresh);
+    const inboundFlights = await resolveOneWayLeg(destUpper, originUpper, returnDate, useLiveApi, forceRefresh);
 
     // Se alguma das pernas estiver raspando, retorna status de carregamento
     if (outboundFlights.status === 'scraping' || inboundFlights.status === 'scraping') {
@@ -669,7 +677,7 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
   }
 
   // Caso 3: Perna única (One-Way)
-  return await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi);
+  return await resolveOneWayLeg(originUpper, destUpper, departureDate, useLiveApi, forceRefresh);
 }
 
 const TOLERANCE_VALUES = [0, 15, 30, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, Infinity];
@@ -692,7 +700,8 @@ export async function searchSingleFlights({
   selectedDates,
   selectedReturnDates,
   sortBy = 'price',
-  timeFilters = {}
+  timeFilters = {},
+  forceRefresh = false
 }) {
   const boolLive = useLiveApi === 'true' || useLiveApi === true;
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
@@ -749,7 +758,8 @@ export async function searchSingleFlights({
       destination,
       departureDate: pair.departureDate,
       returnDate: pair.returnDate,
-      useLiveApi: boolLive
+      useLiveApi: boolLive,
+      forceRefresh
     });
 
     return { pair, flightResults };
@@ -878,7 +888,8 @@ export async function searchCombinedFlights({
   selectedDates,
   selectedReturnDates,
   sortBy = 'sincronia_total',
-  timeFilters = {}
+  timeFilters = {},
+  forceRefresh = false
 }) {
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
   const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
@@ -890,8 +901,8 @@ export async function searchCombinedFlights({
 
   // Busca pernas individuais brutas para ter todas as opções de combinação
   const [person1Flights, person2Flights] = await Promise.all([
-    searchSingleFlights({ origin: origin1, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi }),
-    searchSingleFlights({ origin: origin2, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi })
+    searchSingleFlights({ origin: origin1, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi, forceRefresh }),
+    searchSingleFlights({ origin: origin2, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi, forceRefresh })
   ]);
 
   const p1IsScraping = person1Flights && person1Flights.status === 'scraping';
