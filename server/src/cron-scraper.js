@@ -4,6 +4,7 @@ import path from 'path';
 import { connectDB } from './config/db.js';
 import Alert from './models/Alert.js';
 import FlightCache from './models/FlightCache.js';
+import SearchSession from './models/SearchSession.js';
 import { scrapeGoogleFlights } from './services/providers/googleFlightsScraper.js';
 
 // Carregar variáveis de ambiente
@@ -95,18 +96,20 @@ function getFlexibleDates() {
 }
 
 /**
- * Adiciona uma rota + data na lista de tarefas únicas (suporta Ida e Volta)
+ * Adiciona uma rota + data na lista de tarefas únicas (suporta Ida e Volta e searchHash)
  */
-function queueTask(tasks, origin, destination, departureDate, returnDate = null) {
+function queueTask(tasks, origin, destination, departureDate, returnDate = null, searchHash = null, person = 'p1') {
   if (!departureDate || !origin || !destination) return;
   
-  const key = `${origin.toUpperCase()}-${destination.toUpperCase()}-${departureDate}-${returnDate || ''}`;
+  const key = `${origin.toUpperCase()}-${destination.toUpperCase()}-${departureDate}-${returnDate || ''}-${searchHash || ''}`;
   if (!tasks.has(key)) {
     tasks.set(key, {
       origin: origin.toUpperCase(),
       destination: destination.toUpperCase(),
       departureDate,
-      returnDate
+      returnDate,
+      searchHash,
+      person
     });
   }
 }
@@ -190,14 +193,28 @@ async function runScraperJob() {
       }
     }
 
-    // Caso Extra: LER CACHES PENDENTES DO SISTEMA (Criados nos últimos 15 minutos pelas buscas dos usuários no Vercel)
+    // Caso Extra: LER SESSÕES DE BUSCA PENDENTES DO SISTEMA (Criadas pelos usuários no Vercel)
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const pendingSessions = await SearchSession.find({
+      status: { $in: ['pending', 'scraping'] },
+      createdAt: { $gte: fifteenMinutesAgo }
+    }).lean();
+
+    log(`Encontradas ${pendingSessions.length} sessões de busca pendentes no MongoDB.`);
+    for (const session of pendingSessions) {
+      for (const leg of session.legs) {
+        if (leg.status !== 'completed') {
+          queueTask(tasksMap, leg.origin, leg.destination, leg.departureDate, leg.returnDate, session._id, leg.person);
+        }
+      }
+    }
+
+    // Compatibilidade com FlightCache pendentes Legados
     const pendingCaches = await FlightCache.find({
       status: 'pending',
       scrapedAt: { $gte: fifteenMinutesAgo }
     }).lean();
 
-    log(`Encontrados ${pendingCaches.length} caches de busca pendentes para revalidação.`);
     for (const cache of pendingCaches) {
       queueTask(tasksMap, cache.origin, cache.destination, cache.departureDate, cache.returnDate);
     }
@@ -241,15 +258,22 @@ async function runScraperJob() {
         returnDate: task.returnDate
       });
 
-      // 3. Salva ou atualiza os resultados no banco
+      // 3. Salva ou atualiza os resultados em FlightCache vinculando ao searchHash
       await FlightCache.findOneAndUpdate(
         {
+          searchHash: task.searchHash || null,
           origin: task.origin,
           destination: task.destination,
           departureDate: task.departureDate,
           returnDate: task.returnDate || null
         },
         {
+          searchHash: task.searchHash || null,
+          origin: task.origin,
+          destination: task.destination,
+          departureDate: task.departureDate,
+          returnDate: task.returnDate || null,
+          person: task.person || 'p1',
           flights: flightsList || [],
           scrapedAt: new Date(),
           source: 'scraper',
@@ -257,6 +281,30 @@ async function runScraperJob() {
         },
         { upsert: true, new: true }
       );
+
+      // 4. Se a tarefa pertencer a uma SearchSession, atualiza o status da perna e da sessão
+      if (task.searchHash) {
+        const sessionDoc = await SearchSession.findById(task.searchHash);
+        if (sessionDoc) {
+          const legIdx = sessionDoc.legs.findIndex(l => 
+            l.origin === task.origin && 
+            l.destination === task.destination && 
+            l.departureDate === task.departureDate &&
+            l.person === task.person
+          );
+          if (legIdx !== -1) {
+            sessionDoc.legs[legIdx].status = 'completed';
+            sessionDoc.legs[legIdx].offersCount = flightsList ? flightsList.length : 0;
+          }
+          const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
+          sessionDoc.status = allLegsCompleted ? 'completed' : 'scraping';
+          sessionDoc.totalOffersCount = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
+          sessionDoc.scrapedAt = new Date();
+          await sessionDoc.save();
+          log(`-> SearchSession [${task.searchHash}] atualizada: status=${sessionDoc.status}, totalOffers=${sessionDoc.totalOffersCount}`);
+        }
+      }
+
       log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Gravado/Atualizado no MongoDB com ${flightsList ? flightsList.length : 0} ofertas.`);
       successCount++;
 

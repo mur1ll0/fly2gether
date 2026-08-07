@@ -1,6 +1,8 @@
+import crypto from 'crypto';
 import { searchGoogleFlights } from './providers/googleFlightsProvider.js';
 import { searchDuffelFlights } from './providers/duffelProvider.js';
 import FlightCache from '../models/FlightCache.js';
+import SearchSession from '../models/SearchSession.js';
 import { scrapeGoogleFlights } from './providers/googleFlightsScraper.js';
 import { triggerGithubScraper } from '../utils/githubDispatcher.js';
 
@@ -8,6 +10,18 @@ import { getBrazilianHolidays, getHolidayInfo } from '../utils/holidays.js';
 
 // Cache em memória de rotas já disparadas para o GitHub Actions para evitar disparos duplicados
 const recentlyTriggered = new Set();
+
+export function generateSearchHash(params) {
+  const mode = params.mode || 'normal';
+  const orig1 = (params.origin1 || params.origin || '').toUpperCase().trim();
+  const orig2 = (params.origin2 || '').toUpperCase().trim();
+  const dest = (params.destination || '').toUpperCase().trim();
+  const dep = (params.departureDate || '').trim();
+  const ret = (params.returnDate || '').trim();
+
+  const str = `${mode}:${orig1}:${orig2}:${dest}:${dep}:${ret}`;
+  return crypto.createHash('md5').update(str).digest('hex');
+}
 
 const AIRLINES = [
   { code: 'LA', name: 'LATAM Airlines' },
@@ -675,214 +689,140 @@ async function resolveFlightsForPair({ origin, destination, departureDate, retur
 const TOLERANCE_VALUES = [0, 15, 30, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, Infinity];
 
 // 1. MODO 1: Busca de Voos Únicos (Simples)
-export async function searchSingleFlights({
-  origin,
-  destination,
-  departureDate,
-  returnDate,
-  onlyWeekends = false,
-  isVacation = false,
-  vacationStart,
-  vacationEnd,
-  durationDays = 4,
-  useLiveApi = false,
-  selectedAirlines,
-  stopsFilter = 'all',
-  hideTransfers = false,
-  selectedDates,
-  selectedReturnDates,
-  sortBy = 'price',
-  timeFilters = {},
-  forceRefresh = false
-}) {
-  const boolLive = useLiveApi === 'true' || useLiveApi === true;
+export async function searchSingleFlights(params) {
+  const {
+    origin,
+    destination,
+    departureDate,
+    returnDate,
+    selectedAirlines,
+    stopsFilter = 'all',
+    hideTransfers = false,
+    selectedDates,
+    selectedReturnDates,
+    sortBy = 'price',
+    timeFilters = {},
+    forceRefresh = false
+  } = params;
+
+  const originUpper = (origin || '').toUpperCase().trim();
+  const destUpper = (destination || '').toUpperCase().trim();
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
   const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
   const returnDatesList = selectedReturnDates ? (Array.isArray(selectedReturnDates) ? selectedReturnDates : String(selectedReturnDates).split(',')).filter(Boolean) : [];
   const boolHideTransfers = hideTransfers === 'true' || hideTransfers === true;
 
-  // Geração de datas inteligente (flexibilidade)
-  let candidateDates = [];
-  if (!departureDate) {
-    if (isVacation && vacationStart && vacationEnd) {
-      candidateDates = generateVacationCandidateDates(vacationStart, vacationEnd, durationDays);
-    } else if (onlyWeekends) {
-      const weekendsCount = parseInt(process.env.SCRAPER_WEEKENDS_COUNT) || 8;
-      candidateDates = generateWeekendCandidateDates().slice(0, weekendsCount);
-    } else {
-      const daysAhead = parseInt(process.env.DEFAULT_SEARCH_DAYS_AHEAD) || 60;
-      const stepDays = parseInt(process.env.DEFAULT_SEARCH_STEP_DAYS) || 3;
-      const numSteps = Math.ceil(daysAhead / stepDays);
-      const today = new Date();
+  const searchHash = generateSearchHash({ mode: 'normal', origin: originUpper, destination: destUpper, departureDate, returnDate });
 
-      for (let i = 0; i < numSteps; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + 1 + i * stepDays);
-        const depStr = d.toISOString().split('T')[0];
-
-        let retStr = null;
-        if (returnDate) {
-          const r = new Date(d);
-          r.setDate(d.getDate() + durationDays);
-          retStr = r.toISOString().split('T')[0];
-        }
-
-        candidateDates.push({
-          departureDate: depStr,
-          returnDate: retStr,
-          isWeekendOrHoliday: false,
-          holidayDetails: null
-        });
-      }
-    }
-  } else {
-    candidateDates = [{
-      departureDate,
-      returnDate: returnDate || null,
-      isWeekendOrHoliday: onlyWeekends ? (isWeekend(departureDate) && (!returnDate || isWeekend(returnDate))) : false,
-      holidayDetails: getHolidayOnDate(departureDate)
-    }];
+  if (forceRefresh) {
+    console.log(`[Force Refresh] Limpando sessão e voos para hash ${searchHash}`);
+    await SearchSession.deleteOne({ _id: searchHash });
+    await FlightCache.deleteMany({ searchHash });
   }
 
-  const searchPromises = candidateDates.map(async (pair) => {
-    const flightResults = await resolveFlightsForPair({
-      origin,
-      destination,
-      departureDate: pair.departureDate,
-      returnDate: pair.returnDate,
-      useLiveApi: boolLive,
-      forceRefresh
-    });
+  // 1. Tentar encontrar SearchSession ativa (< 2h)
+  let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
-    return { pair, flightResults };
-  });
+  if (!session) {
+    console.log(`[SearchSession Miss] Criando nova sessão de busca normal no Mongo: ${searchHash}`);
+    session = await SearchSession.findOneAndUpdate(
+      { _id: searchHash },
+      {
+        _id: searchHash,
+        searchHash,
+        mode: 'normal',
+        origin1: originUpper,
+        destination: destUpper,
+        departureDate,
+        returnDate: returnDate || null,
+        status: 'pending',
+        legs: [{ origin: originUpper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p1', status: 'pending', offersCount: 0 }],
+        totalOffersCount: 0,
+        scrapedAt: new Date(),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000)
+      },
+      { upsert: true, new: true }
+    );
 
-  const resolvedBatches = await Promise.all(searchPromises);
+    triggerGithubScraper(originUpper, destUpper, departureDate, returnDate).catch(() => {});
+  }
 
-  let completedCount = 0;
-  const legDetails = [];
+  // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash ou rota equivalente
+  const cachedDocs = await FlightCache.find({
+    $or: [
+      { searchHash },
+      { origin: originUpper, destination: destUpper, departureDate, returnDate: returnDate || null }
+    ]
+  }).lean();
+
   const allFlights = [];
-  let isAnyScraping = false;
+  cachedDocs.forEach(doc => {
+    (doc.flights || []).forEach(flight => {
+      const flightDepDate = flight.departureDate || departureDate;
+      const flightRetDate = flight.returnDate || returnDate;
 
-  for (const batch of resolvedBatches) {
-    const { pair, flightResults } = batch;
-    const isScraping = flightResults && (flightResults.status === 'scraping' || (Array.isArray(flightResults) && flightResults.some(r => r && r.status === 'scraping')));
+      if (datesList.length > 0 && !datesList.includes(flightDepDate)) return;
+      if (returnDatesList.length > 0 && flightRetDate && !returnDatesList.includes(flightRetDate)) return;
+      if (airlinesList.length > 0 && flight.airline?.code && !airlinesList.includes(flight.airline.code)) return;
+      if (stopsFilter === 'direct' && (flight.stopsCount > 0 || (flight.returnStopsCount || 0) > 0)) return;
+      if (stopsFilter === 'stops' && flight.stopsCount === 0 && (flight.returnStopsCount || 0) === 0) return;
+      if (boolHideTransfers && (flight.hasAirportTransfer || flight.returnHasAirportTransfer)) return;
 
-    const depDate = pair?.departureDate;
-    const retDate = pair?.returnDate;
+      const tf = timeFilters || {};
+      if (!isTimeInWindow(flight.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return;
+      if (!isTimeInWindow(flight.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return;
+      if (!isTimeInWindow(flight.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return;
+      if (!isTimeInWindow(flight.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return;
 
-    if (isScraping) {
-      isAnyScraping = true;
-      legDetails.push({
-        origin,
-        destination,
-        departureDate: depDate,
-        returnDate: retDate,
-        status: 'scraping',
-        flightsCount: 0
+      allFlights.push({
+        ...flight,
+        origin: flight.origin || originUpper,
+        destination: flight.destination || destUpper,
+        departureDate: flightDepDate,
+        returnDate: flightRetDate
       });
-    } else {
-      completedCount++;
-      const flightsArray = Array.isArray(flightResults) ? flightResults : [];
-      legDetails.push({
-        origin,
-        destination,
-        departureDate: depDate,
-        returnDate: retDate,
-        status: 'completed',
-        flightsCount: flightsArray.length
-      });
-
-      flightsArray.forEach(flight => {
-        const flightDepDate = flight.departureDate || depDate;
-        const flightRetDate = flight.returnDate || retDate;
-
-        // Aplica filtros backend se definidos
-        if (datesList.length > 0 && !datesList.includes(flightDepDate)) return;
-        if (returnDatesList.length > 0 && flightRetDate && !returnDatesList.includes(flightRetDate)) return;
-        if (airlinesList.length > 0 && flight.airline?.code && !airlinesList.includes(flight.airline.code)) return;
-        if (stopsFilter === 'direct' && (flight.stopsCount > 0 || (flight.returnStopsCount || 0) > 0)) return;
-        if (stopsFilter === 'stops' && flight.stopsCount === 0 && (flight.returnStopsCount || 0) === 0) return;
-        if (boolHideTransfers && (flight.hasAirportTransfer || flight.returnHasAirportTransfer)) return;
-
-        // Filtros de Horários Pessoais / Perna Única
-        const tf = timeFilters || {};
-        if (!isTimeInWindow(flight.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return;
-        if (!isTimeInWindow(flight.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return;
-        if (!isTimeInWindow(flight.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return;
-        if (!isTimeInWindow(flight.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return;
-
-        let isNight = true;
-        if (flight.departureTime) {
-          const [h] = flight.departureTime.split(':').map(Number);
-          isNight = h >= 19;
-        }
-
-        allFlights.push({
-          ...flight,
-          origin: flight.origin || origin,
-          destination: flight.destination || destination,
-          departureDate: flightDepDate,
-          returnDate: flight.returnDate || retDate,
-          isWeekendOrHoliday: pair?.isWeekendOrHoliday || false,
-          holidayDetails: pair?.holidayDetails || null,
-          isNightDeparture: isNight
-        });
-      });
-    }
-  }
-
-  if (isAnyScraping) {
-    const totalCount = candidateDates.length;
-    const totalOffersFound = legDetails.reduce((sum, l) => sum + (l.flightsCount || 0), 0);
-    return {
-      status: 'scraping',
-      message: `O robô está coletando passagens aéreas... (${completedCount} de ${totalCount} datas concluídas | ${totalOffersFound} ofertas catalogadas)`,
-      completedCount,
-      totalCount,
-      totalOffersFound,
-      legDetails
-    };
-  }
-
-  // Ordenação final no backend
-  allFlights.sort((a, b) => {
-    if (a.isMegaPromo && !b.isMegaPromo) return -1;
-    if (!a.isMegaPromo && b.isMegaPromo) return 1;
-    if (onlyWeekends && a.isWeekendOrHoliday && !b.isWeekendOrHoliday) return -1;
-    if (onlyWeekends) {
-      if (a.isNightDeparture && !b.isNightDeparture) return -1;
-      if (!a.isNightDeparture && b.isNightDeparture) return 1;
-    }
-    return a.totalPrice - b.totalPrice;
+    });
   });
 
-  return allFlights.slice(0, 5000);
+  allFlights.sort((a, b) => (a.totalPrice || 0) - (b.totalPrice || 0));
+
+  const isCompleted = session.status === 'completed';
+  const completedLegsCount = session.legs.filter(l => l.status === 'completed').length;
+
+  return {
+    results: allFlights,
+    status: session.status,
+    isCompleted,
+    completedCount: completedLegsCount,
+    totalCount: session.legs.length,
+    totalOffersFound: allFlights.length,
+    legDetails: session.legs
+  };
 }
 
 // 2. MODO 2: Fly Together (Voos Combinados: Origem 1 + Origem 2 -> Mesmo Destino)
-export async function searchCombinedFlights({
-  origin1,
-  origin2,
-  destination,
-  departureDate,
-  returnDate,
-  onlyWeekends = false,
-  isVacation = false,
-  vacationStart,
-  vacationEnd,
-  durationDays = 4,
-  useLiveApi = false,
-  selectedAirlines,
-  stopsFilter = 'all',
-  hideTransfers = false,
-  toleranceIndex,
-  selectedDates,
-  selectedReturnDates,
-  sortBy = 'sincronia_total',
-  timeFilters = {},
-  forceRefresh = false
-}) {
+export async function searchCombinedFlights(params) {
+  const {
+    origin1,
+    origin2,
+    destination,
+    departureDate,
+    returnDate,
+    selectedAirlines,
+    stopsFilter = 'all',
+    hideTransfers = false,
+    toleranceIndex,
+    selectedDates,
+    selectedReturnDates,
+    sortBy = 'sincronia_total',
+    timeFilters = {},
+    forceRefresh = false
+  } = params;
+
+  const orig1Upper = (origin1 || '').toUpperCase().trim();
+  const orig2Upper = (origin2 || '').toUpperCase().trim();
+  const destUpper = (destination || '').toUpperCase().trim();
   const airlinesList = selectedAirlines ? (Array.isArray(selectedAirlines) ? selectedAirlines : String(selectedAirlines).split(',')).filter(Boolean) : [];
   const datesList = selectedDates ? (Array.isArray(selectedDates) ? selectedDates : String(selectedDates).split(',')).filter(Boolean) : [];
   const returnDatesList = selectedReturnDates ? (Array.isArray(selectedReturnDates) ? selectedReturnDates : String(selectedReturnDates).split(',')).filter(Boolean) : [];
@@ -891,45 +831,93 @@ export async function searchCombinedFlights({
   const tIdx = parseInt(toleranceIndex);
   const toleranceMinutes = (!isNaN(tIdx) && TOLERANCE_VALUES[tIdx] !== undefined) ? TOLERANCE_VALUES[tIdx] : Infinity;
 
-  // Busca pernas individuais brutas para ter todas as opções de combinação
-  const [person1Flights, person2Flights] = await Promise.all([
-    searchSingleFlights({ origin: origin1, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi, forceRefresh }),
-    searchSingleFlights({ origin: origin2, destination, departureDate, returnDate, onlyWeekends, isVacation, vacationStart, vacationEnd, durationDays, useLiveApi, forceRefresh })
-  ]);
+  const searchHash = generateSearchHash({ mode: 'flytogether', origin1: orig1Upper, origin2: orig2Upper, destination: destUpper, departureDate, returnDate });
 
-  const p1IsScraping = person1Flights && person1Flights.status === 'scraping';
-  const p2IsScraping = person2Flights && person2Flights.status === 'scraping';
-
-  if (p1IsScraping || p2IsScraping) {
-    const p1Total = p1IsScraping ? (person1Flights.totalCount || 8) : (Array.isArray(person1Flights) ? (new Set(person1Flights.map(f => f.departureDate)).size || 8) : 8);
-    const p1Completed = p1IsScraping ? (person1Flights.completedCount || 0) : p1Total;
-    const p1Legs = p1IsScraping ? (person1Flights.legDetails || []) : (Array.isArray(person1Flights) ? [{ origin: origin1, destination, status: 'completed', flightsCount: person1Flights.length }] : []);
-
-    const p2Total = p2IsScraping ? (person2Flights.totalCount || 8) : (Array.isArray(person2Flights) ? (new Set(person2Flights.map(f => f.departureDate)).size || 8) : 8);
-    const p2Completed = p2IsScraping ? (person2Flights.completedCount || 0) : p2Total;
-    const p2Legs = p2IsScraping ? (person2Flights.legDetails || []) : (Array.isArray(person2Flights) ? [{ origin: origin2, destination, status: 'completed', flightsCount: person2Flights.length }] : []);
-
-    const totalCompleted = p1Completed + p2Completed;
-    const totalCount = p1Total + p2Total;
-    const combinedLegDetails = [...p1Legs, ...p2Legs];
-    const totalOffersFound = combinedLegDetails.reduce((sum, l) => sum + (l.flightsCount || 0), 0);
-
-    return {
-      status: 'scraping',
-      message: `O robô está coletando voos do casal... (${totalCompleted} de ${totalCount} trechos concluídos | ${totalOffersFound} ofertas catalogadas)`,
-      completedCount: totalCompleted,
-      totalCount,
-      totalOffersFound,
-      legDetails: combinedLegDetails
-    };
+  if (forceRefresh) {
+    console.log(`[Force Refresh] Limpando sessão Fly Together e voos para hash ${searchHash}`);
+    await SearchSession.deleteOne({ _id: searchHash });
+    await FlightCache.deleteMany({ searchHash });
   }
+
+  // 1. Tentar encontrar SearchSession ativa (< 2h)
+  let session = forceRefresh ? null : await SearchSession.findById(searchHash);
+
+  if (!session) {
+    console.log(`[SearchSession Miss] Criando nova sessão de busca Fly Together no Mongo: ${searchHash}`);
+    session = await SearchSession.findOneAndUpdate(
+      { _id: searchHash },
+      {
+        _id: searchHash,
+        searchHash,
+        mode: 'flytogether',
+        origin1: orig1Upper,
+        origin2: orig2Upper,
+        destination: destUpper,
+        departureDate,
+        returnDate: returnDate || null,
+        status: 'pending',
+        legs: [
+          { origin: orig1Upper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p1', status: 'pending', offersCount: 0 },
+          { origin: orig2Upper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p2', status: 'pending', offersCount: 0 }
+        ],
+        totalOffersCount: 0,
+        scrapedAt: new Date(),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000)
+      },
+      { upsert: true, new: true }
+    );
+
+    triggerGithubScraper(orig1Upper, destUpper, departureDate, returnDate).catch(() => {});
+    triggerGithubScraper(orig2Upper, destUpper, departureDate, returnDate).catch(() => {});
+  }
+
+  // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash
+  const cachedDocs = await FlightCache.find({
+    $or: [
+      { searchHash },
+      { origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate, returnDate: returnDate || null }
+    ]
+  }).lean();
+
+  const p1Array = [];
+  const p2Array = [];
+
+  cachedDocs.forEach(doc => {
+    const isP2 = doc.person === 'p2' || doc.origin === orig2Upper;
+    const targetArr = isP2 ? p2Array : p1Array;
+
+    (doc.flights || []).forEach(flight => {
+      targetArr.push({
+        ...flight,
+        origin: flight.origin || (isP2 ? orig2Upper : orig1Upper),
+        destination: flight.destination || destUpper,
+        departureDate: flight.departureDate || departureDate,
+        returnDate: flight.returnDate || returnDate
+      });
+    });
+  });
+
+  const combinedResults = combineFlightsForCouple(p1Array, p2Array, toleranceMinutes, airlinesList, boolHideTransfers, stopsFilter, datesList, returnDatesList, timeFilters);
+
+  const isCompleted = session.status === 'completed';
+  const completedLegsCount = session.legs.filter(l => l.status === 'completed').length;
+
+  return {
+    results: combinedResults,
+    status: session.status,
+    isCompleted,
+    completedCount: completedLegsCount,
+    totalCount: session.legs.length,
+    totalOffersFound: p1Array.length + p2Array.length,
+    legDetails: session.legs
+  };
+}
 
   const p1Array = Array.isArray(person1Flights) ? person1Flights : [];
   const p2Array = Array.isArray(person2Flights) ? person2Flights : [];
 
-  const allAvailableDates = Array.from(new Set([...p1Array.map(f => f.departureDate), ...p2Array.map(f => f.departureDate)].filter(Boolean))).sort();
-  const allAvailableReturnDates = Array.from(new Set([...p1Array.map(f => f.returnDate), ...p2Array.map(f => f.returnDate)].filter(Boolean))).sort();
-
+function combineFlightsForCouple(p1Array, p2Array, toleranceMinutes, airlinesList = [], boolHideTransfers = false, stopsFilter = 'all', datesList = [], returnDatesList = [], timeFilters = {}, sortBy = 'sincronia_total') {
   const combinedResults = [];
 
   for (const f1 of p1Array) {
@@ -938,45 +926,36 @@ export async function searchCombinedFlights({
         const flightDepDate = f1.departureDate;
         const flightRetDate = f1.returnDate;
 
-        // 1. Filtro por Data de Ida Selecionada
         if (datesList.length > 0 && !datesList.includes(flightDepDate)) continue;
-
-        // 2. Filtro por Data de Volta Selecionada
         if (returnDatesList.length > 0 && flightRetDate && !returnDatesList.includes(flightRetDate)) continue;
 
-        // 2. Filtro por Companhia Aérea
         const code1 = f1.airline?.code;
         const code2 = f2.airline?.code;
         if (airlinesList.length > 0 && (!airlinesList.includes(code1) || !airlinesList.includes(code2))) continue;
 
-        // 3. Filtro por Escalas
         if (stopsFilter === 'direct') {
           if (f1.stopsCount > 0 || f2.stopsCount > 0 || (f1.returnStopsCount || 0) > 0 || (f2.returnStopsCount || 0) > 0) continue;
         } else if (stopsFilter === 'stops') {
           if (f1.stopsCount === 0 && f2.stopsCount === 0 && (f1.returnStopsCount || 0) === 0 && (f2.returnStopsCount || 0) === 0) continue;
         }
 
-        // 4. Filtro por Troca de Aeroporto
         if (boolHideTransfers) {
           if (f1.hasAirportTransfer || f1.returnHasAirportTransfer || f2.hasAirportTransfer || f2.returnHasAirportTransfer) continue;
         }
 
-        // 4.5. Filtros de Horários Específicos para Pessoa 1 e Pessoa 2
         const tf = timeFilters || {};
-        // Pessoa 1
         if (!isTimeInWindow(f1.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) continue;
         if (!isTimeInWindow(f1.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) continue;
         if (!isTimeInWindow(f1.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) continue;
         if (!isTimeInWindow(f1.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) continue;
-        // Pessoa 2
+
         if (!isTimeInWindow(f2.departureTime, tf.p2DepTimeMin, tf.p2DepTimeMax)) continue;
         if (!isTimeInWindow(f2.arrivalTime, tf.p2ArrTimeMin, tf.p2ArrTimeMax)) continue;
         if (!isTimeInWindow(f2.returnDepartureTime, tf.p2RetDepTimeMin, tf.p2RetDepTimeMax)) continue;
         if (!isTimeInWindow(f2.returnArrivalTime, tf.p2RetArrTimeMin, tf.p2RetArrTimeMax)) continue;
 
-        // 5. Filtro por Tolerância de Sincronia de Pouso/Decolagem
-        const [h1, m1] = f1.arrivalTime.split(':').map(Number);
-        const [h2, m2] = f2.arrivalTime.split(':').map(Number);
+        const [h1, m1] = (f1.arrivalTime || '12:00').split(':').map(Number);
+        const [h2, m2] = (f2.arrivalTime || '12:00').split(':').map(Number);
         const arrivalDeltaMinutes = Math.abs((h1 * 60 + m1) - (h2 * 60 + m2));
 
         if (toleranceMinutes !== Infinity) {
@@ -992,7 +971,7 @@ export async function searchCombinedFlights({
           if (averageDelta > toleranceMinutes) continue;
         }
 
-        const combinedPrice = f1.totalPrice + f2.totalPrice;
+        const combinedPrice = (f1.totalPrice || 0) + (f2.totalPrice || 0);
         const hasPromo = f1.isMegaPromo || f2.isMegaPromo;
         const sharedStayMinutes = calculateSharedStayMinutes(f1, f2, f1.departureDate, f1.returnDate);
         const hours = Math.floor(sharedStayMinutes / 60);
@@ -1001,11 +980,11 @@ export async function searchCombinedFlights({
 
         combinedResults.push({
           id: `combined-${f1.id}-${f2.id}`,
-          destination,
+          destination: f1.destination,
           departureDate: f1.departureDate,
           returnDate: f1.returnDate,
           person1: {
-            origin: origin1,
+            origin: f1.origin,
             airline: f1.airline,
             departureTime: f1.departureTime,
             arrivalTime: f1.arrivalTime,
@@ -1018,18 +997,16 @@ export async function searchCombinedFlights({
             returnAirplane: f1.returnAirplane,
             price: f1.totalPrice,
             isMegaPromo: f1.isMegaPromo,
-            stopsDetails: f1.stopsDetails,
             stopsCount: f1.stopsCount,
             stopsList: f1.stopsList || [],
             returnStopsCount: f1.returnStopsCount || 0,
             returnStopsList: f1.returnStopsList || [],
             hasAirportTransfer: f1.hasAirportTransfer,
             returnHasAirportTransfer: f1.returnHasAirportTransfer,
-            bookingUrl: f1.bookingUrl,
-            isNightDeparture: f1.isNightDeparture
+            bookingUrl: f1.bookingUrl
           },
           person2: {
-            origin: origin2,
+            origin: f2.origin,
             airline: f2.airline,
             departureTime: f2.departureTime,
             arrivalTime: f2.arrivalTime,
@@ -1042,94 +1019,31 @@ export async function searchCombinedFlights({
             returnAirplane: f2.returnAirplane,
             price: f2.totalPrice,
             isMegaPromo: f2.isMegaPromo,
-            stopsDetails: f2.stopsDetails,
             stopsCount: f2.stopsCount,
             stopsList: f2.stopsList || [],
             returnStopsCount: f2.returnStopsCount || 0,
             returnStopsList: f2.returnStopsList || [],
             hasAirportTransfer: f2.hasAirportTransfer,
             returnHasAirportTransfer: f2.returnHasAirportTransfer,
-            bookingUrl: f2.bookingUrl,
-            isNightDeparture: f2.isNightDeparture
+            bookingUrl: f2.bookingUrl
           },
           combinedPrice,
           arrivalDeltaMinutes,
           isSynchronized: arrivalDeltaMinutes <= 60,
           hasPromo,
           sharedStayMinutes,
-          sharedStayFormatted,
-          isWeekendOrHoliday: f1.isWeekendOrHoliday,
-          holidayDetails: f1.holidayDetails,
-          matchScore: Math.round(100 - (arrivalDeltaMinutes / 2) - (combinedPrice / 50))
+          sharedStayFormatted
         });
       }
     }
   }
 
-  // Ordenação final backend
   combinedResults.sort((a, b) => {
-    if (a.hasPromo && !b.hasPromo) return -1;
-    if (!a.hasPromo && b.hasPromo) return 1;
-
-    if (onlyWeekends) {
-      const aNight = a.person1?.isNightDeparture && a.person2?.isNightDeparture;
-      const bNight = b.person1?.isNightDeparture && b.person2?.isNightDeparture;
-      if (aNight && !bNight) return -1;
-      if (!aNight && bNight) return 1;
-    }
-
-    if (sortBy === 'tempo_juntos') {
-      if (b.sharedStayMinutes !== a.sharedStayMinutes) return b.sharedStayMinutes - a.sharedStayMinutes;
-      return a.combinedPrice - b.combinedPrice;
-    }
-    if (sortBy === 'price') {
-      return a.combinedPrice - b.combinedPrice;
-    }
-    if (sortBy === 'sincronia') {
-      return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
-    }
-
-    // Padrão: sincronia_total
-    if (b.sharedStayMinutes !== a.sharedStayMinutes) return b.sharedStayMinutes - a.sharedStayMinutes;
-    if (a.arrivalDeltaMinutes !== b.arrivalDeltaMinutes) return a.arrivalDeltaMinutes - b.arrivalDeltaMinutes;
-    return a.combinedPrice - b.combinedPrice;
+    if (sortBy === 'tempo_juntos') return (b.sharedStayMinutes || 0) - (a.sharedStayMinutes || 0);
+    if (sortBy === 'price') return (a.combinedPrice || 0) - (b.combinedPrice || 0);
+    if (sortBy === 'sincronia') return (a.arrivalDeltaMinutes || 0) - (b.arrivalDeltaMinutes || 0);
+    return ((a.arrivalDeltaMinutes || 0) + (a.combinedPrice || 0) / 100) - ((b.arrivalDeltaMinutes || 0) + (b.combinedPrice || 0) / 100);
   });
 
-  if (combinedResults.length === 0) {
-    const getPersonDiag = (orig, flightsArray) => {
-      if (flightsArray.length > 0) {
-        const prices = flightsArray.map(f => f.totalPrice).filter(p => typeof p === 'number' && !isNaN(p) && p > 0);
-        const minPrice = prices.length ? Math.min(...prices) : 0;
-        const maxPrice = prices.length ? Math.max(...prices) : 0;
-        return {
-          hasFlights: true,
-          count: flightsArray.length,
-          minPrice,
-          maxPrice,
-          reason: `Foram encontrados ${flightsArray.length} voos de ${orig} para ${destination}, com valores a partir de R$ ${minPrice.toLocaleString('pt-BR')} até R$ ${maxPrice.toLocaleString('pt-BR')}.`
-        };
-      } else {
-        const routeDiag = diagnoseAirportRoute(orig, destination);
-        return {
-          hasFlights: false,
-          count: 0,
-          ...routeDiag
-        };
-      }
-    };
-
-    const diagnostics = {
-      person1: { origin: origin1, destination, ...getPersonDiag(origin1, p1Array) },
-      person2: { origin: origin2, destination, ...getPersonDiag(origin2, p2Array) },
-      summaryReason: `Nenhuma combinação atendeu aos critérios de filtro selecionados.`
-    };
-
-    return { status: 'completed', results: [], diagnostics, allAvailableDates, allAvailableReturnDates };
-  }
-
-  return {
-    results: combinedResults.slice(0, 5000),
-    allAvailableDates,
-    allAvailableReturnDates
-  };
+  return combinedResults;
 }

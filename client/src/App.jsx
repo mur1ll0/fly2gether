@@ -142,6 +142,10 @@ export default function App() {
           params: searchParams
         });
         
+        if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
+          setResults(res.data.results);
+        }
+
         if (res.data?.status !== 'scraping') {
           console.log('✅ [Polling] Coleta concluída com sucesso!');
           setResults(Array.isArray(res.data?.results) ? res.data.results : []);
@@ -168,7 +172,7 @@ export default function App() {
       } catch (err) {
         console.error('❌ [Polling] Erro no polling de busca:', err);
       }
-    }, 3000); // Polling responsivo a cada 3s
+    }, 10000); // Polling responsivo a cada 10s
   };
 
   const handleSearch = async (e) => {
@@ -273,6 +277,9 @@ export default function App() {
       });
 
       if (res.data?.status === 'scraping') {
+        if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
+          setResults(res.data.results);
+        }
         setScrapingMessage(res.data.message || 'Nosso robô iniciou a busca no Google Flights...');
         if (res.data.totalCount !== undefined) {
           setScrapingProgress({
@@ -594,6 +601,28 @@ export default function App() {
   useEffect(() => {
     setCurrentPage(1);
   }, [results, selectedAirlines, stopsFilter, hideTransfers, sortBy, toleranceIndex, timeFilters]);
+
+  // Listener de desbloqueio de tela do celular (visibilitychange) para checagem instantânea no Mongo
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && loading && lastSearchParamsRef.current) {
+        console.log('📱 [Mobile Unlock] Tela reativada. Checando status da SearchSession no Mongo...');
+        API.get('/flights/search', { params: lastSearchParamsRef.current })
+          .then(res => {
+            if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
+              setResults(res.data.results);
+            }
+            if (res.data?.status !== 'scraping') {
+              setLoading(false);
+              setScrapingMessage('');
+            }
+          })
+          .catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [loading]);
 
   const PAGE_SIZE = 100;
 
