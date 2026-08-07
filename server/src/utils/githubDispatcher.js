@@ -17,10 +17,10 @@ export async function triggerGithubScraper(origin = null, destination = null, de
     return false;
   }
 
-  // Se um disparo foi feito nos últimos 15 segundos para esta instância, reutiliza o runner que já foi ativado
+  // Se um disparo foi feito nos últimos 4 minutos (240s), reutiliza o runner que já está rodando na nuvem
   const now = Date.now();
-  if (now - lastDispatchTimestamp < 15000) {
-    console.log('[CONFIG] ℹ️ Um robô de busca já foi ativado recentemente (< 15s). Reutilizando a execução ativa na nuvem.');
+  if (now - lastDispatchTimestamp < 240000) {
+    console.log('[CONFIG] ℹ️ Um robô de busca já foi ativado recentemente (< 4 min). Reutilizando a execução ativa na nuvem.');
     return true;
   }
   // Marca o timestamp síncrono imediatamente para bloquear chamadas simultâneas no mesmo ciclo

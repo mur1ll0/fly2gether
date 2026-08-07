@@ -520,16 +520,8 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false, f
         const isLocal = process.env.RUN_SCRAPER_LOCALLY === 'true' || process.env.NODE_ENV === 'development';
         if (isLocal) {
           triggerLocalScrape(originUpper, destUpper, date);
-        } else {
-          // Em produção (Vercel), re-triga periodicamente o robô a cada 30s se o polling continuar pendente
-          const triggerKey = `${originUpper}-${destUpper}`;
-          if (!recentlyTriggered.has(triggerKey)) {
-            recentlyTriggered.add(triggerKey);
-            setTimeout(() => recentlyTriggered.delete(triggerKey), 30000);
-            triggerGithubScraper(originUpper, destUpper, date).catch(() => {});
-          }
         }
-
+        // Em produção, a busca está rodando ativamente na nuvem. Aguarda o término dentro da janela de 5 minutos sem re-disparar.
         return {
           status: 'scraping',
           origin: originUpper,
