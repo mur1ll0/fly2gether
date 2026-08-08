@@ -84,6 +84,7 @@ export default function App() {
 
   const abortControllerRef = useRef(null);
   const pollingIntervalRef = useRef(null);
+  const lastSearchParamsRef = useRef(null);
 
   // Restaurar dados da última pesquisa do usuário
   useEffect(() => {
@@ -302,6 +303,8 @@ export default function App() {
         forceRefresh: forceRefresh ? 'true' : 'false',
         ...timeFilters
       };
+
+      lastSearchParamsRef.current = params;
 
       const res = await API.get('/flights/search', {
         params,

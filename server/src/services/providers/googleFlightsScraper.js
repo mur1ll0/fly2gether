@@ -166,14 +166,14 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate, 
         const candidates = Array.from(document.querySelectorAll('li, div[class*="card"], div[class*="row"]'));
         flightRows = candidates.filter(el => {
           const t = el.innerText || '';
-          return t.includes('R$') && /\d{2}:\d{2}/.test(t);
+          return t.includes('R$') && /\d{1,2}:\d{2}/.test(t);
         });
       }
 
       return flightRows.map((row, index) => {
         const text = row.innerText || '';
         const priceMatch = text.match(/R\$\s*([\d\.]+)/);
-        const timesMatch = text.match(/(\d{2}:\d{2})\s*[\u2013–-]\s*(\d{2}:\d{2})/);
+        const timesMatch = text.match(/(\d{1,2}:\d{2})/);
         return {
           index,
           hasPrice: !!priceMatch,
@@ -189,7 +189,7 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate, 
       log(`Row [${row.index}]: textLength=${row.textLength}, hasPrice=${row.hasPrice}, hasTimes=${row.hasTimes}`);
     });
 
-    const validRows = initialRowsData.filter(r => r.hasPrice && r.hasTimes);
+    const validRows = initialRowsData.filter(r => r.hasPrice && (r.hasTimes || r.textLength > 30));
     log(`Encontrados ${validRows.length} cards de voo válidos no DOM.`);
 
     const flights = [];
@@ -297,10 +297,13 @@ function parseFlightText(baseText, expandedText, searchOrigin, searchDestination
   const priceMatch = baseText.match(/R\$\s*([\d\.]+)/);
   const totalPrice = priceMatch ? parseInt(priceMatch[1].replace(/\./g, '')) : 450;
 
-  // 2. Extrair Horários do texto base (extremamente confiável antes de expandir)
-  const timesMatch = baseText.match(/(\d{2}:\d{2})\s*[\u2013–-]\s*(\d{2}:\d{2})/);
-  const departureTime = timesMatch ? timesMatch[1] : '08:00';
-  const arrivalTime = timesMatch ? timesMatch[2] : '10:00';
+  // 2. Extrair Horários do texto base
+  const timeMatches = Array.from(baseText.matchAll(/(\d{1,2}:\d{2})/g)).map(m => {
+    const parts = m[1].split(':');
+    return `${parts[0].padStart(2, '0')}:${parts[1]}`;
+  });
+  const departureTime = timeMatches[0] || '08:00';
+  const arrivalTime = timeMatches[1] || '10:00';
 
   // 3. Extrair Duração do texto base
   const durationMatch = baseText.match(/(\d+h\s*\d*m*|\d+\s*min)/i);
