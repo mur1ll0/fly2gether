@@ -72,7 +72,7 @@ async function searchOneWayGoogleFlights({ origin, destination, departureDate, a
     const lowestPrice = priceInsights.lowest_price || 0;
     
     const googleFlightsUrl = response.data?.search_metadata?.google_flights_url || 
-      `https://www.google.com/travel/flights?hl=pt&gl=br&q=Voos%2520de%2520${origin.toUpperCase()}%20para%20${destination.toUpperCase()}%20em%20${departureDate}`;
+      `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origin.toUpperCase()}+para+${destination.toUpperCase()}+em+${departureDate}`;
 
     return allOffers.map((item, index) => {
       const flightsList = item.flights || [];
@@ -274,7 +274,7 @@ export async function searchGoogleFlights({ origin, destination, departureDate, 
           airplane,
           totalPrice,
           bookingToken: item.booking_token || null,
-          bookingUrl: response.data?.search_metadata?.google_flights_url || `https://www.google.com/travel/flights?hl=pt&gl=br&q=Voos%20de%2520${origin}%20para%2520${destination}`,
+          bookingUrl: response.data?.search_metadata?.google_flights_url || `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origin}+para+${destination}`,
           provider: 'Google Flights (ao vivo)'
         };
       });
@@ -291,7 +291,7 @@ export async function searchGoogleFlights({ origin, destination, departureDate, 
     const priceInsights = response.data?.price_insights || {};
     const lowestPrice = priceInsights.lowest_price || 0;
     const googleFlightsUrl = response.data?.search_metadata?.google_flights_url || 
-      `https://www.google.com/travel/flights?hl=pt&gl=br&q=Voos%2520de%2520${origin?.toUpperCase()}%20para%20${destination?.toUpperCase()}`;
+      `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origin?.toUpperCase()}+para+${destination?.toUpperCase()}+${departureDate}${returnDate ? '+' + returnDate : ''}`;
 
     // Se for ida e volta, buscamos automaticamente as voltas associadas à melhor ida em lote para montar o par
     if (returnDate) {
@@ -435,7 +435,7 @@ export async function searchGoogleFlights({ origin, destination, departureDate, 
             totalPrice,
             isMegaPromo,
             bookingToken: retItem.booking_token || null,
-            bookingUrl: response.data?.search_metadata?.google_flights_url || `https://www.google.com/travel/flights?hl=pt&gl=br&q=Voos%20de%2520${origin}%20para%2520${destination}`,
+            bookingUrl: response.data?.search_metadata?.google_flights_url || `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origin}+para+${destination}+${departureDate}${returnDate ? '+' + returnDate : ''}`,
             provider: 'Google Flights (ao vivo)'
           };
         });

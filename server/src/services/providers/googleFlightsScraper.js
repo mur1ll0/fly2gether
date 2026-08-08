@@ -87,8 +87,8 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate, 
   const destUpper = destination.toUpperCase();
   
   const url = returnDate 
-    ? `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origUpper}%20para%20${destUpper}%20de%20${departureDate}%20a%20${returnDate}`
-    : `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos%20de%20${origUpper}%20para%20${destUpper}%20em%20${departureDate}`;
+    ? `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origUpper}+para+${destUpper}+${departureDate}+${returnDate}`
+    : `https://www.google.com/travel/flights?hl=pt-BR&gl=BR&q=Voos+de+${origUpper}+para+${destUpper}+em+${departureDate}`;
   
   log(`Iniciando raspagem para Rota: ${origUpper} ➔ ${destUpper} | Ida: ${departureDate} | Volta: ${returnDate || 'N/A'}`);
   const tmpDir = os.tmpdir();
