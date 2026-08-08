@@ -1,12 +1,12 @@
 import axios from 'axios';
 
-// Trava em memória para evitar disparar dispatches em rajada num intervalo menor que 10 segundos
-let lastDispatchTimestamp = 0;
+// Trava por chave em memória para evitar disparos em rajada num intervalo menor que 30 segundos
+const activeDispatches = new Map();
 
 /**
- * Dispara UMA ÚNICA execução em lote (1 Runner) no GitHub Actions para processar todas as pernas pendentes no MongoDB
+ * Dispara a execução no GitHub Actions para processar as pernas pendentes no MongoDB
  */
-export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null) {
+export async function triggerGithubScraper(origin = null, destination = null, departureDate = null, returnDate = null, searchHash = null) {
   const token = process.env.GITHUB_PAT || process.env.GH_PAT || process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO || process.env.GH_REPO || 'mur1ll0/fly2gether';
 
@@ -17,14 +17,17 @@ export async function triggerGithubScraper(origin = null, destination = null, de
     return false;
   }
 
-  // Se um disparo foi feito nos últimos 4 minutos (240s), reutiliza o runner que já está rodando na nuvem
+  const dispatchKey = searchHash || `${origin || 'BATCH'}_${destination || ''}_${departureDate || ''}_${returnDate || ''}`;
   const now = Date.now();
-  if (now - lastDispatchTimestamp < 240000) {
-    console.log('[CONFIG] ℹ️ Um robô de busca já foi ativado recentemente (< 4 min). Reutilizando a execução ativa na nuvem.');
+  const lastTime = activeDispatches.get(dispatchKey) || 0;
+
+  // Evita disparar rajadas duplicadas do mesmo lote em menos de 30 segundos
+  if (now - lastTime < 30000) {
+    console.log(`[CONFIG] ℹ️ Disparo recente (< 30s) para o lote [${dispatchKey}]. Reutilizando robô em andamento.`);
     return true;
   }
-  // Marca o timestamp síncrono imediatamente para bloquear chamadas simultâneas no mesmo ciclo
-  lastDispatchTimestamp = now;
+
+  activeDispatches.set(dispatchKey, now);
 
   try {
     const url = `https://api.github.com/repos/${repo}/dispatches`;
@@ -40,7 +43,8 @@ export async function triggerGithubScraper(origin = null, destination = null, de
           origin: origin ? origin.toUpperCase() : '',
           destination: destination ? destination.toUpperCase() : '',
           departureDate: departureDate || '',
-          returnDate: returnDate || ''
+          returnDate: returnDate || '',
+          searchHash: searchHash || ''
         }
       },
       {
@@ -50,18 +54,17 @@ export async function triggerGithubScraper(origin = null, destination = null, de
           'X-GitHub-Api-Version': '2022-11-28',
           'User-Agent': 'Fly2Gether-App'
         },
-        timeout: 5000
+        timeout: 8000
       }
     );
 
-    // Atualiza a trava de memória somente APÓS sucesso HTTP 2xx (status 204)
-    lastDispatchTimestamp = Date.now();
+    activeDispatches.set(dispatchKey, Date.now());
 
     console.log(`[CONFIG] ✅ Conexão com GitHub Actions estabelecida com sucesso! Workflow de raspagem iniciado para ${origStr} ➔ ${destStr}. (Status API: ${response.status})`);
     return true;
   } catch (error) {
-    console.error('[CONFIG] ❌ Falha na comunicação com o GitHub API:', error.response?.data || error.message);
+    activeDispatches.delete(dispatchKey); // Limpa para permitir nova tentativa em caso de falha HTTP
+    console.error('[CONFIG] ❌ Falha na comunicação com a API do GitHub:', error.response?.data || error.message);
     return false;
   }
 }
-

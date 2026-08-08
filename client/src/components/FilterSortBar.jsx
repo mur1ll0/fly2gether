@@ -148,40 +148,12 @@ export default function FilterSortBar({
               <span>Ocultar Troca de Aeroporto</span>
             </label>
           </div>
-
-          {/* Botão de Horários Específicos */}
-          <button
-            type="button"
-            onClick={() => setShowTimeFilters(!showTimeFilters)}
-            className={`flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
-              showTimeFilters || activeTimeFilterCount > 0
-                ? 'bg-brand-500/20 text-brand-300 border-brand-500/40 ring-1 ring-brand-500/30'
-                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-brand-400" />
-            <span>Filtros de Horário {activeTimeFilterCount > 0 && `(${activeTimeFilterCount})`}</span>
-            {showTimeFilters ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
-          </button>
         </div>
       </div>
 
-      {/* Segunda linha: Horários Específicos (Expandível) */}
-      {showTimeFilters && (
-        <div className="border-t border-slate-800/80 pt-3 animate-fadeIn">
-          <DateTimeFilterGroup
-            searchMode={searchMode}
-            person1Name={person1Name}
-            person2Name={person2Name}
-            timeFilters={timeFilters}
-            setTimeFilters={setTimeFilters}
-          />
-        </div>
-      )}
-
-      {/* Terceira linha: Filtro por Datas de Ida e Volta em Dropdowns */}
-      {((availableDates && availableDates.length > 0) || (availableReturnDates && availableReturnDates.length > 0)) && (
-        <div className="border-t border-slate-800/80 pt-3 flex flex-wrap items-center gap-6">
+      {/* Segunda linha: Filtro por Datas de Ida/Volta e Botão de Filtros de Horário */}
+      <div className="border-t border-slate-800/80 pt-3 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-6">
           {availableDates && availableDates.length > 0 && (
             <DateMultiSelectDropdown
               availableDates={availableDates}
@@ -200,6 +172,34 @@ export default function FilterSortBar({
               iconColor="text-purple-400"
             />
           )}
+        </div>
+
+        {/* Botão de Horários Específicos */}
+        <button
+          type="button"
+          onClick={() => setShowTimeFilters(!showTimeFilters)}
+          className={`flex items-center space-x-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+            showTimeFilters || activeTimeFilterCount > 0
+              ? 'bg-brand-500/20 text-brand-300 border-brand-500/40 ring-1 ring-brand-500/30'
+              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-brand-400" />
+          <span>Filtros de Horário {activeTimeFilterCount > 0 && `(${activeTimeFilterCount})`}</span>
+          {showTimeFilters ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />}
+        </button>
+      </div>
+
+      {/* Terceira linha: Horários Específicos (Expandível - Posicionado abaixo das datas) */}
+      {showTimeFilters && (
+        <div className="border-t border-slate-800/80 pt-3 animate-fadeIn">
+          <DateTimeFilterGroup
+            searchMode={searchMode}
+            person1Name={person1Name}
+            person2Name={person2Name}
+            timeFilters={timeFilters}
+            setTimeFilters={setTimeFilters}
+          />
         </div>
       )}
 

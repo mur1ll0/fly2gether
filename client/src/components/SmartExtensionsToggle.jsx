@@ -1,6 +1,7 @@
 import React from 'react';
 import { Calendar, Sun, Palmtree, Clock, Sparkles } from 'lucide-react';
 import SmartDatePreview from './SmartDatePreview';
+import CustomDateInput from './CustomDateInput';
 
 export default function SmartExtensionsToggle({
   departureDate,
@@ -88,24 +89,21 @@ export default function SmartExtensionsToggle({
       {/* Painel Expansível de Férias Conjuntas */}
       {isVacation && (
         <div className="mt-4 p-4 bg-slate-950/70 border border-purple-500/30 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-4 animate-fadeIn">
-          <div>
-            <label className="block text-xs font-medium text-purple-300 mb-1">Início das Férias</label>
-            <input
-              type="date"
-              value={vacationStart}
-              onChange={(e) => setVacationStart(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-purple-300 mb-1">Fim das Férias</label>
-            <input
-              type="date"
-              value={vacationEnd}
-              onChange={(e) => setVacationEnd(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-100 focus:outline-none focus:border-purple-500"
-            />
-          </div>
+          <CustomDateInput
+            label="Início das Férias"
+            value={vacationStart}
+            onChange={setVacationStart}
+            placeholder="dd/mm/yyyy"
+            iconColor="text-purple-400"
+          />
+
+          <CustomDateInput
+            label="Fim das Férias"
+            value={vacationEnd}
+            onChange={setVacationEnd}
+            placeholder="dd/mm/yyyy"
+            iconColor="text-purple-400"
+          />
           <div>
             <label className="block text-xs font-medium text-purple-300 mb-1">Duração da Viagem (Dias)</label>
             <select

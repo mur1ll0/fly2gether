@@ -194,22 +194,51 @@ async function runScraperJob() {
     }
 
     // Caso Extra: LER SESSÕES DE BUSCA PENDENTES DO SISTEMA (Criadas pelos usuários no Vercel)
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const pendingSessions = await SearchSession.find({
-      status: { $in: ['pending', 'scraping'] },
-      createdAt: { $gte: fifteenMinutesAgo }
+      status: { $in: ['pending', 'scraping'] }
     }).lean();
 
     log(`Encontradas ${pendingSessions.length} sessões de busca pendentes no MongoDB.`);
     for (const session of pendingSessions) {
-      for (const leg of session.legs) {
-        if (leg.status !== 'completed') {
+      const sessionDoc = await SearchSession.findById(session._id);
+      if (!sessionDoc) continue;
+
+      let sessionUpdated = false;
+      for (const leg of sessionDoc.legs) {
+        // Checa se o FlightCache no banco já possui os voos salvos para esta perna
+        const cached = await FlightCache.findOne({
+          origin: leg.origin,
+          destination: leg.destination,
+          departureDate: leg.departureDate,
+          status: 'completed'
+        });
+
+        if (cached && (cached.flights || []).length > 0) {
+          leg.status = 'completed';
+          leg.offersCount = cached.flights.length;
+          sessionUpdated = true;
+        } else if (leg.status !== 'completed' && leg.departureDate) {
           queueTask(tasksMap, leg.origin, leg.destination, leg.departureDate, leg.returnDate, session._id, leg.person);
         }
+      }
+
+      const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
+      if (allLegsCompleted) {
+        sessionDoc.status = 'completed';
+        sessionDoc.totalOffersCount = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
+        sessionDoc.scrapedAt = new Date();
+        sessionDoc.updatedAt = new Date();
+        sessionUpdated = true;
+      }
+
+      if (sessionUpdated) {
+        await sessionDoc.save();
+        log(`-> Pre-check: SearchSession [${session._id}] sincronizada no Mongo. Status=${sessionDoc.status}`);
       }
     }
 
     // Compatibilidade com FlightCache pendentes Legados
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
     const pendingCaches = await FlightCache.find({
       status: 'pending',
       scrapedAt: { $gte: fifteenMinutesAgo }
@@ -226,6 +255,45 @@ async function runScraperJob() {
   let successCount = 0;
   let skippedCount = 0;
   let failureCount = 0;
+
+async function updateSearchSessionLeg(searchHash, task, offersCount) {
+  if (!searchHash) return;
+  try {
+    const sessionDoc = await SearchSession.findById(searchHash);
+    if (sessionDoc) {
+      const legIdx = sessionDoc.legs.findIndex(l => 
+        l.origin === task.origin && 
+        l.destination === task.destination && 
+        l.departureDate === task.departureDate &&
+        (l.person === task.person || !task.person)
+      );
+      if (legIdx !== -1) {
+        sessionDoc.legs[legIdx].status = 'completed';
+        sessionDoc.legs[legIdx].offersCount = offersCount;
+      } else {
+        const matchIdx = sessionDoc.legs.findIndex(l =>
+          l.origin === task.origin &&
+          l.destination === task.destination &&
+          l.departureDate === task.departureDate &&
+          l.status !== 'completed'
+        );
+        if (matchIdx !== -1) {
+          sessionDoc.legs[matchIdx].status = 'completed';
+          sessionDoc.legs[matchIdx].offersCount = offersCount;
+        }
+      }
+      const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
+      sessionDoc.status = allLegsCompleted ? 'completed' : 'scraping';
+      sessionDoc.totalOffersCount = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
+      sessionDoc.scrapedAt = new Date();
+      sessionDoc.updatedAt = new Date();
+      await sessionDoc.save();
+      log(`-> SearchSession [${searchHash}] perna [${task.origin}➔${task.destination}] atualizada: status=${sessionDoc.status}, ofertas=${offersCount}`);
+    }
+  } catch (err) {
+    log(`-> Erro ao atualizar SearchSession [${searchHash}]: ${err.message}`);
+  }
+}
 
   const concurrencyLimit = parseInt(process.env.SCRAPER_CONCURRENCY) || 3;
   log(`Iniciando processamento das tarefas com limite de concorrência = ${concurrencyLimit}`);
@@ -245,7 +313,8 @@ async function runScraperJob() {
       });
 
       if (existingCache) {
-        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Cache fresco encontrado no MongoDB. Pulando raspagem.`);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Cache fresco encontrado no MongoDB. Atualizando SearchSession.`);
+        await updateSearchSessionLeg(task.searchHash, task, existingCache.flights ? existingCache.flights.length : 0);
         skippedCount++;
         return;
       }
@@ -283,27 +352,7 @@ async function runScraperJob() {
       );
 
       // 4. Se a tarefa pertencer a uma SearchSession, atualiza o status da perna e da sessão
-      if (task.searchHash) {
-        const sessionDoc = await SearchSession.findById(task.searchHash);
-        if (sessionDoc) {
-          const legIdx = sessionDoc.legs.findIndex(l => 
-            l.origin === task.origin && 
-            l.destination === task.destination && 
-            l.departureDate === task.departureDate &&
-            l.person === task.person
-          );
-          if (legIdx !== -1) {
-            sessionDoc.legs[legIdx].status = 'completed';
-            sessionDoc.legs[legIdx].offersCount = flightsList ? flightsList.length : 0;
-          }
-          const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
-          sessionDoc.status = allLegsCompleted ? 'completed' : 'scraping';
-          sessionDoc.totalOffersCount = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
-          sessionDoc.scrapedAt = new Date();
-          await sessionDoc.save();
-          log(`-> SearchSession [${task.searchHash}] atualizada: status=${sessionDoc.status}, totalOffers=${sessionDoc.totalOffersCount}`);
-        }
-      }
+      await updateSearchSessionLeg(task.searchHash, task, flightsList ? flightsList.length : 0);
 
       log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Gravado/Atualizado no MongoDB com ${flightsList ? flightsList.length : 0} ofertas.`);
       successCount++;
@@ -329,6 +378,7 @@ async function runScraperJob() {
           },
           { upsert: true }
         );
+        await updateSearchSessionLeg(task.searchHash, task, 0);
       } catch (dbErr) {
         log(`-> Erro ao salvar falha no MongoDB: ${dbErr.message}`);
       }
@@ -345,6 +395,25 @@ async function runScraperJob() {
   });
 
   await Promise.all(workers);
+
+  // Sincronização final do status de todas as sessões pendentes lidas
+  for (const session of pendingSessions) {
+    try {
+      const sessionDoc = await SearchSession.findById(session._id);
+      if (sessionDoc) {
+        const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
+        if (allLegsCompleted || sessionDoc.legs.length === 0) {
+          sessionDoc.status = 'completed';
+          sessionDoc.scrapedAt = new Date();
+          sessionDoc.updatedAt = new Date();
+          await sessionDoc.save();
+          log(`-> SearchSession [${session._id}] sincronizada como 'completed'.`);
+        }
+      }
+    } catch (e) {
+      log(`-> Erro na sincronização final da SearchSession: ${e.message}`);
+    }
+  }
 
   log(`Job concluído. Sucessos: ${successCount}, Pulados: ${skippedCount}, Falhas: ${failureCount}`);
 }

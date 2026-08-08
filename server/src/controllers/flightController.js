@@ -76,8 +76,21 @@ export async function handleSearchFlights(req, res) {
         timeFilters
       });
 
-      if (results && results.status === 'scraping') {
-        return res.json(results);
+      const isScrapingStillRunning = results && (results.status === 'scraping' || results.status === 'pending' || results.isCompleted === false);
+
+      if (isScrapingStillRunning) {
+        return res.json({
+          status: 'scraping',
+          isCompleted: false,
+          message: results.message || 'O robô está coletando voos no Google Flights...',
+          completedCount: results.completedCount || 0,
+          totalCount: results.totalCount || 0,
+          totalOffersFound: results.totalOffersFound || 0,
+          legDetails: results.legDetails || [],
+          results: results.results || [],
+          allAvailableDates: results.allAvailableDates || [],
+          allAvailableReturnDates: results.allAvailableReturnDates || []
+        });
       }
 
       const finalResults = Array.isArray(results) ? results : (results?.results || []);
@@ -121,16 +134,37 @@ export async function handleSearchFlights(req, res) {
         timeFilters
       });
 
-      if (results && results.status === 'scraping') {
-        return res.json(results);
+      const isScrapingStillRunning = results && (results.status === 'scraping' || results.status === 'pending' || results.isCompleted === false);
+
+      if (isScrapingStillRunning) {
+        return res.json({
+          status: 'scraping',
+          isCompleted: false,
+          message: results.message || 'O robô está coletando voos no Google Flights...',
+          completedCount: results.completedCount || 0,
+          totalCount: results.totalCount || 0,
+          totalOffersFound: results.totalOffersFound || 0,
+          legDetails: results.legDetails || [],
+          results: results.results || [],
+          allAvailableDates: results.allAvailableDates || [],
+          allAvailableReturnDates: results.allAvailableReturnDates || []
+        });
       }
 
+      const finalResults = Array.isArray(results) ? results : (results?.results || []);
       let diagnostics = null;
-      if (Array.isArray(results) && results.length === 0) {
+      if (finalResults.length === 0) {
         diagnostics = diagnoseAirportRoute(origin, destination);
       }
 
-      return res.json({ mode: 'normal', total: results.length, results, diagnostics });
+      return res.json({
+        mode: 'normal',
+        total: finalResults.length,
+        results: finalResults,
+        diagnostics,
+        allAvailableDates: results?.allAvailableDates || [],
+        allAvailableReturnDates: results?.allAvailableReturnDates || []
+      });
     }
   } catch (error) {
     console.error('Erro na busca de voos:', error.message);

@@ -12,6 +12,8 @@ import MyAlertsDrawer from './components/MyAlertsDrawer';
 import API from './services/api';
 import { useAuth } from './context/AuthContext';
 import ScraperProgress from './components/ScraperProgress';
+import CustomDateInput from './components/CustomDateInput';
+import { formatToBrazillianDate } from './utils/dateFormatter';
 
 export default function App() {
   const { user } = useAuth();
@@ -135,6 +137,18 @@ export default function App() {
   const startPollingSearch = (searchParams) => {
     if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     
+    // Executa a primeira sondagem 3.5s após a chamada inicial
+    setTimeout(async () => {
+      try {
+        const res = await API.get('/flights/search', { params: searchParams });
+        if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
+          setResults(res.data.results);
+        }
+        if (res.data?.allAvailableDates) setServerAvailableDates(res.data.allAvailableDates);
+        if (res.data?.allAvailableReturnDates) setServerAvailableReturnDates(res.data.allAvailableReturnDates);
+      } catch (e) {}
+    }, 3500);
+
     pollingIntervalRef.current = setInterval(async () => {
       try {
         console.log('🔄 [Polling] Verificando se a coleta do robô terminou...');
@@ -145,8 +159,12 @@ export default function App() {
         if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
           setResults(res.data.results);
         }
+        if (res.data?.allAvailableDates) setServerAvailableDates(res.data.allAvailableDates);
+        if (res.data?.allAvailableReturnDates) setServerAvailableReturnDates(res.data.allAvailableReturnDates);
 
-        if (res.data?.status !== 'scraping') {
+        const isScrapingStillRunning = res.data?.status === 'scraping' || res.data?.status === 'pending' || res.data?.isCompleted === false;
+
+        if (!isScrapingStillRunning) {
           console.log('✅ [Polling] Coleta concluída com sucesso!');
           setResults(Array.isArray(res.data?.results) ? res.data.results : []);
           setSearchDiagnostics(res.data?.diagnostics || null);
@@ -159,7 +177,7 @@ export default function App() {
           }
           fetchSerpApiUsage();
         } else {
-          setScrapingMessage(res.data.message || 'Nosso robô está minerando tarifas...');
+          setScrapingMessage(res.data.message || 'Nosso robô está minerando tarifas no Google Flights...');
           if (res.data.totalCount !== undefined) {
             setScrapingProgress({
               completed: res.data.completedCount || 0,
@@ -172,7 +190,7 @@ export default function App() {
       } catch (err) {
         console.error('❌ [Polling] Erro no polling de busca:', err);
       }
-    }, 10000); // Polling responsivo a cada 10s
+    }, 5000); // Polling responsivo a cada 5s
   };
 
   const handleSearch = async (e) => {
@@ -276,10 +294,15 @@ export default function App() {
         signal: abortControllerRef.current.signal
       });
 
-      if (res.data?.status === 'scraping') {
+      const isScrapingStillRunning = res.data?.status === 'scraping' || res.data?.status === 'pending' || res.data?.isCompleted === false;
+
+      if (isScrapingStillRunning) {
         if (Array.isArray(res.data?.results) && res.data.results.length > 0) {
           setResults(res.data.results);
         }
+        if (res.data?.allAvailableDates) setServerAvailableDates(res.data.allAvailableDates);
+        if (res.data?.allAvailableReturnDates) setServerAvailableReturnDates(res.data.allAvailableReturnDates);
+
         setScrapingMessage(res.data.message || 'Nosso robô iniciou a busca no Google Flights...');
         if (res.data.totalCount !== undefined) {
           setScrapingProgress({
@@ -429,7 +452,7 @@ export default function App() {
       }, 350);
       return () => clearTimeout(timer);
     }
-  }, [selectedDates, selectedReturnDates, selectedAirlines, stopsFilter, hideTransfers, toleranceIndex, sortBy]);
+  }, [selectedDates, selectedReturnDates, selectedAirlines, stopsFilter, hideTransfers, toleranceIndex, sortBy, timeFilters]);
 
   // Checar se há resultados provenientes de cache expirado (SWR em revalidação)
   const hasStaleResults = useMemo(() => {
@@ -746,29 +769,21 @@ export default function App() {
 
             {/* Optional Specific Dates */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 p-4 bg-slate-950/40 rounded-2xl border border-slate-800/60">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Data de Ida (Opcional - Deixe em branco para busca flexível)
-                </label>
-                <input
-                  type="date"
-                  value={departureDate}
-                  onChange={(e) => setDepartureDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-brand-500"
-                />
-              </div>
+              <CustomDateInput
+                label="Data de Ida (Opcional - Deixe em branco para busca flexível)"
+                value={departureDate}
+                onChange={setDepartureDate}
+                placeholder="dd/mm/yyyy"
+                iconColor="text-brand-400"
+              />
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Data de Volta (Opcional)
-                </label>
-                <input
-                  type="date"
-                  value={returnDate}
-                  onChange={(e) => setReturnDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-brand-500"
-                />
-              </div>
+              <CustomDateInput
+                label="Data de Volta (Opcional)"
+                value={returnDate}
+                onChange={setReturnDate}
+                placeholder="dd/mm/yyyy"
+                iconColor="text-purple-400"
+              />
             </div>
 
             {/* Global Smart Extensions Component */}

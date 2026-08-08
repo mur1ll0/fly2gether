@@ -17,7 +17,7 @@ const SearchSessionSchema = new mongoose.Schema({
   origin1: { type: String, required: true },
   origin2: { type: String, default: null },
   destination: { type: String, required: true },
-  departureDate: { type: String, required: true },
+  departureDate: { type: String, default: null },
   returnDate: { type: String, default: null },
   status: { type: String, enum: ['pending', 'scraping', 'completed', 'failed'], default: 'pending' },
   legs: [LegSchema],

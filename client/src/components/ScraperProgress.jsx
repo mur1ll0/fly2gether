@@ -1,5 +1,6 @@
 import React from 'react';
 import { Bot, RefreshCw, XCircle, CheckCircle2, Sparkles, Plane, Layers, Flame, AlertTriangle } from 'lucide-react';
+import { formatToBrazillianDate } from '../utils/dateFormatter';
 
 export default function ScraperProgress({
   scrapingMessage,
@@ -107,7 +108,7 @@ export default function ScraperProgress({
           <div className="max-h-48 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-2 custom-scrollbar">
             {legDetails.map((leg, idx) => {
               const isDone = leg.status === 'completed';
-              const dateStr = leg.departureDate ? leg.departureDate.substring(5) : '';
+              const dateStr = leg.departureDate ? formatToBrazillianDate(leg.departureDate) : '';
               return (
                 <div
                   key={idx}

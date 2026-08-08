@@ -236,6 +236,67 @@ function generateVacationCandidateDates(start, end, duration) {
 }
 
 /**
+ * Helper para gerar candidateDates (finais de semana, férias ou busca flexível)
+ */
+export function helperGenerateCandidateDates(params) {
+  const {
+    departureDate,
+    returnDate,
+    onlyWeekends = false,
+    isVacation = false,
+    vacationStart,
+    vacationEnd,
+    durationDays = 4
+  } = params;
+
+  if (departureDate) {
+    return [{
+      departureDate,
+      returnDate: returnDate || null,
+      isWeekendOrHoliday: onlyWeekends ? (isWeekend(departureDate) && (!returnDate || isWeekend(returnDate))) : false,
+      holidayDetails: getHolidayOnDate(departureDate)
+    }];
+  }
+
+  if (isVacation && vacationStart && vacationEnd) {
+    return generateVacationCandidateDates(vacationStart, vacationEnd, durationDays);
+  }
+
+  if (onlyWeekends) {
+    const weekendsCount = parseInt(process.env.SCRAPER_WEEKENDS_COUNT) || 8;
+    return generateWeekendCandidateDates().slice(0, weekendsCount);
+  }
+
+  const daysAhead = parseInt(process.env.DEFAULT_SEARCH_DAYS_AHEAD) || 60;
+  const stepDays = parseInt(process.env.DEFAULT_SEARCH_STEP_DAYS) || 3;
+  const numSteps = Math.ceil(daysAhead / stepDays);
+  const today = new Date();
+  const candidates = [];
+
+  for (let i = 0; i < numSteps; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + 1 + i * stepDays);
+    const depStr = d.toISOString().split('T')[0];
+
+    let retStr = null;
+    if (returnDate) {
+      const r = new Date(d);
+      r.setDate(d.getDate() + durationDays);
+      retStr = r.toISOString().split('T')[0];
+    }
+
+    candidates.push({
+      departureDate: depStr,
+      returnDate: retStr,
+      isWeekendOrHoliday: false,
+      holidayDetails: null
+    });
+  }
+
+  return candidates;
+}
+
+/**
  * Calcula o tempo total compartilhado que o casal passa junto no destino (em minutos)
  */
 function calculateSharedStayMinutes(f1, f2, departureDate, returnDate) {
@@ -695,6 +756,11 @@ export async function searchSingleFlights(params) {
     destination,
     departureDate,
     returnDate,
+    onlyWeekends,
+    isVacation,
+    vacationStart,
+    vacationEnd,
+    durationDays,
     selectedAirlines,
     stopsFilter = 'all',
     hideTransfers = false,
@@ -712,6 +778,20 @@ export async function searchSingleFlights(params) {
   const returnDatesList = selectedReturnDates ? (Array.isArray(selectedReturnDates) ? selectedReturnDates : String(selectedReturnDates).split(',')).filter(Boolean) : [];
   const boolHideTransfers = hideTransfers === 'true' || hideTransfers === true;
 
+  const boolWeekends = onlyWeekends === 'true' || onlyWeekends === true;
+  const boolVacation = isVacation === 'true' || isVacation === true;
+  const parsedDuration = parseInt(durationDays) || 4;
+
+  const candidateDates = helperGenerateCandidateDates({
+    departureDate,
+    returnDate,
+    onlyWeekends: boolWeekends,
+    isVacation: boolVacation,
+    vacationStart,
+    vacationEnd,
+    durationDays: parsedDuration
+  });
+
   const searchHash = generateSearchHash({ mode: 'normal', origin: originUpper, destination: destUpper, departureDate, returnDate });
 
   if (forceRefresh) {
@@ -723,8 +803,27 @@ export async function searchSingleFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
-  if (!session) {
-    console.log(`[SearchSession Miss] Criando nova sessão de busca normal no Mongo: ${searchHash}`);
+  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos)
+  const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
+    (Date.now() - new Date(session.scrapedAt || session.createdAt || 0).getTime() > 120000);
+
+  if (!session || isStalled || (session.legs && session.legs.some(l => !l.departureDate))) {
+    if (session) {
+      console.log(`[SearchSession Reset] Sessão normal ${searchHash} resetada (stalled=${isStalled}). Redisparando robô no GitHub Actions...`);
+      await SearchSession.deleteOne({ _id: searchHash });
+    }
+
+    const legs = candidateDates.map(pair => ({
+      origin: originUpper,
+      destination: destUpper,
+      departureDate: pair.departureDate,
+      returnDate: pair.returnDate || null,
+      person: 'p1',
+      status: 'pending',
+      offersCount: 0
+    }));
+
+    console.log(`[SearchSession Miss] Criando nova sessão de busca normal no Mongo (${legs.length} trechos): ${searchHash}`);
     session = await SearchSession.findOneAndUpdate(
       { _id: searchHash },
       {
@@ -733,10 +832,10 @@ export async function searchSingleFlights(params) {
         mode: 'normal',
         origin1: originUpper,
         destination: destUpper,
-        departureDate,
+        departureDate: departureDate || null,
         returnDate: returnDate || null,
         status: 'pending',
-        legs: [{ origin: originUpper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p1', status: 'pending', offersCount: 0 }],
+        legs,
         totalOffersCount: 0,
         scrapedAt: new Date(),
         createdAt: new Date(),
@@ -745,14 +844,15 @@ export async function searchSingleFlights(params) {
       { upsert: true, new: true }
     );
 
-    triggerGithubScraper(originUpper, destUpper, departureDate, returnDate).catch(() => {});
+    triggerGithubScraper(originUpper, destUpper, departureDate, returnDate, searchHash).catch(() => {});
   }
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash ou rota equivalente
+  const targetDates = candidateDates.map(c => c.departureDate);
   const cachedDocs = await FlightCache.find({
     $or: [
       { searchHash },
-      { origin: originUpper, destination: destUpper, departureDate, returnDate: returnDate || null }
+      { origin: originUpper, destination: destUpper, departureDate: { $in: targetDates } }
     ]
   }).lean();
 
@@ -787,17 +887,52 @@ export async function searchSingleFlights(params) {
 
   allFlights.sort((a, b) => (a.totalPrice || 0) - (b.totalPrice || 0));
 
-  const isCompleted = session.status === 'completed';
-  const completedLegsCount = session.legs.filter(l => l.status === 'completed').length;
+  // Auto-sincroniza o status da SearchSession se o FlightCache já possui os voos das pernas
+  const originsWithFlights = new Set(cachedDocs.filter(d => (d.flights || []).length > 0).map(d => `${d.origin}_${d.departureDate}`));
+  let updatedLegs = false;
+  if (session && session.legs) {
+    session.legs.forEach(leg => {
+      const key = `${leg.origin}_${leg.departureDate}`;
+      if ((originsWithFlights.has(key) || allFlights.some(f => f.origin === leg.origin && f.departureDate === leg.departureDate)) && leg.status !== 'completed') {
+        leg.status = 'completed';
+        leg.offersCount = allFlights.filter(f => f.origin === leg.origin && f.departureDate === leg.departureDate).length;
+        updatedLegs = true;
+      }
+    });
+
+    const allLegsCompleted = session.legs.every(l => l.status === 'completed');
+    if (allLegsCompleted && session.status !== 'completed') {
+      session.status = 'completed';
+      session.scrapedAt = new Date();
+      updatedLegs = true;
+    }
+
+    if (updatedLegs) {
+      session.totalOffersCount = allFlights.length;
+      await session.save();
+    }
+  }
+
+  const isCompleted = session ? session.status === 'completed' : true;
+  const completedLegsCount = session && session.legs ? session.legs.filter(l => l.status === 'completed').length : 0;
+  const totalCount = session && session.legs ? session.legs.length : 1;
+
+  const allAvailableDates = Array.from(new Set(allFlights.map(f => f.departureDate).filter(Boolean))).sort();
+  const allAvailableReturnDates = Array.from(new Set(allFlights.map(f => f.returnDate).filter(Boolean))).sort();
 
   return {
     results: allFlights,
-    status: session.status,
+    status: isCompleted ? 'completed' : 'scraping',
     isCompleted,
+    message: isCompleted
+      ? 'Busca concluída'
+      : `O robô está coletando passagens aéreas no Google Flights... (${completedLegsCount} de ${totalCount} trechos concluídos | ${allFlights.length} ofertas catalogadas)`,
     completedCount: completedLegsCount,
-    totalCount: session.legs.length,
+    totalCount,
     totalOffersFound: allFlights.length,
-    legDetails: session.legs
+    legDetails: session.legs || [],
+    allAvailableDates,
+    allAvailableReturnDates
   };
 }
 
@@ -809,6 +944,11 @@ export async function searchCombinedFlights(params) {
     destination,
     departureDate,
     returnDate,
+    onlyWeekends,
+    isVacation,
+    vacationStart,
+    vacationEnd,
+    durationDays,
     selectedAirlines,
     stopsFilter = 'all',
     hideTransfers = false,
@@ -831,6 +971,20 @@ export async function searchCombinedFlights(params) {
   const tIdx = parseInt(toleranceIndex);
   const toleranceMinutes = (!isNaN(tIdx) && TOLERANCE_VALUES[tIdx] !== undefined) ? TOLERANCE_VALUES[tIdx] : Infinity;
 
+  const boolWeekends = onlyWeekends === 'true' || onlyWeekends === true;
+  const boolVacation = isVacation === 'true' || isVacation === true;
+  const parsedDuration = parseInt(durationDays) || 4;
+
+  const candidateDates = helperGenerateCandidateDates({
+    departureDate,
+    returnDate,
+    onlyWeekends: boolWeekends,
+    isVacation: boolVacation,
+    vacationStart,
+    vacationEnd,
+    durationDays: parsedDuration
+  });
+
   const searchHash = generateSearchHash({ mode: 'flytogether', origin1: orig1Upper, origin2: orig2Upper, destination: destUpper, departureDate, returnDate });
 
   if (forceRefresh) {
@@ -842,8 +996,39 @@ export async function searchCombinedFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
-  if (!session) {
-    console.log(`[SearchSession Miss] Criando nova sessão de busca Fly Together no Mongo: ${searchHash}`);
+  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos)
+  const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
+    (Date.now() - new Date(session.scrapedAt || session.createdAt || 0).getTime() > 120000);
+
+  if (!session || isStalled || (session.legs && session.legs.some(l => !l.departureDate))) {
+    if (session) {
+      console.log(`[SearchSession Reset] Sessão Fly Together ${searchHash} resetada (stalled=${isStalled}). Redisparando robô no GitHub Actions...`);
+      await SearchSession.deleteOne({ _id: searchHash });
+    }
+
+    const legs = [];
+    candidateDates.forEach(pair => {
+      legs.push({
+        origin: orig1Upper,
+        destination: destUpper,
+        departureDate: pair.departureDate,
+        returnDate: pair.returnDate || null,
+        person: 'p1',
+        status: 'pending',
+        offersCount: 0
+      });
+      legs.push({
+        origin: orig2Upper,
+        destination: destUpper,
+        departureDate: pair.departureDate,
+        returnDate: pair.returnDate || null,
+        person: 'p2',
+        status: 'pending',
+        offersCount: 0
+      });
+    });
+
+    console.log(`[SearchSession Miss] Criando nova sessão de busca Fly Together no Mongo (${legs.length} trechos): ${searchHash}`);
     session = await SearchSession.findOneAndUpdate(
       { _id: searchHash },
       {
@@ -853,13 +1038,10 @@ export async function searchCombinedFlights(params) {
         origin1: orig1Upper,
         origin2: orig2Upper,
         destination: destUpper,
-        departureDate,
+        departureDate: departureDate || null,
         returnDate: returnDate || null,
         status: 'pending',
-        legs: [
-          { origin: orig1Upper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p1', status: 'pending', offersCount: 0 },
-          { origin: orig2Upper, destination: destUpper, departureDate, returnDate: returnDate || null, person: 'p2', status: 'pending', offersCount: 0 }
-        ],
+        legs,
         totalOffersCount: 0,
         scrapedAt: new Date(),
         createdAt: new Date(),
@@ -868,15 +1050,15 @@ export async function searchCombinedFlights(params) {
       { upsert: true, new: true }
     );
 
-    triggerGithubScraper(orig1Upper, destUpper, departureDate, returnDate).catch(() => {});
-    triggerGithubScraper(orig2Upper, destUpper, departureDate, returnDate).catch(() => {});
+    triggerGithubScraper(orig1Upper, destUpper, departureDate, returnDate, searchHash).catch(() => {});
   }
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash
+  const targetDates = candidateDates.map(c => c.departureDate);
   const cachedDocs = await FlightCache.find({
     $or: [
       { searchHash },
-      { origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate, returnDate: returnDate || null }
+      { origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate: { $in: targetDates } }
     ]
   }).lean();
 
@@ -900,17 +1082,57 @@ export async function searchCombinedFlights(params) {
 
   const combinedResults = combineFlightsForCouple(p1Array, p2Array, toleranceMinutes, airlinesList, boolHideTransfers, stopsFilter, datesList, returnDatesList, timeFilters);
 
-  const isCompleted = session.status === 'completed';
-  const completedLegsCount = session.legs.filter(l => l.status === 'completed').length;
+  // Auto-sincroniza o status da SearchSession se o FlightCache já possui os voos do casal
+  const p1LegsWithFlights = new Set(p1Array.map(f => `${f.origin}_${f.departureDate}`));
+  const p2LegsWithFlights = new Set(p2Array.map(f => `${f.origin}_${f.departureDate}`));
+
+  let updatedLegs = false;
+  if (session && session.legs) {
+    session.legs.forEach(leg => {
+      const key = `${leg.origin}_${leg.departureDate}`;
+      const hasFlights = leg.person === 'p2' ? p2LegsWithFlights.has(key) : p1LegsWithFlights.has(key);
+      if (hasFlights && leg.status !== 'completed') {
+        leg.status = 'completed';
+        leg.offersCount = leg.person === 'p2'
+          ? p2Array.filter(f => f.departureDate === leg.departureDate).length
+          : p1Array.filter(f => f.departureDate === leg.departureDate).length;
+        updatedLegs = true;
+      }
+    });
+
+    const allLegsCompleted = session.legs.every(l => l.status === 'completed');
+    if (allLegsCompleted && session.status !== 'completed') {
+      session.status = 'completed';
+      session.scrapedAt = new Date();
+      updatedLegs = true;
+    }
+
+    if (updatedLegs) {
+      session.totalOffersCount = p1Array.length + p2Array.length;
+      await session.save();
+    }
+  }
+
+  const isCompleted = session ? session.status === 'completed' : true;
+  const completedLegsCount = session && session.legs ? session.legs.filter(l => l.status === 'completed').length : 0;
+  const totalCount = session && session.legs ? session.legs.length : 1;
+
+  const allAvailableDates = Array.from(new Set([...p1Array.map(f => f.departureDate), ...p2Array.map(f => f.departureDate)].filter(Boolean))).sort();
+  const allAvailableReturnDates = Array.from(new Set([...p1Array.map(f => f.returnDate), ...p2Array.map(f => f.returnDate)].filter(Boolean))).sort();
 
   return {
     results: combinedResults,
-    status: session.status,
+    status: isCompleted ? 'completed' : 'scraping',
     isCompleted,
+    message: isCompleted
+      ? 'Busca concluída'
+      : `O robô está coletando os voos do casal no Google Flights... (${completedLegsCount} de ${totalCount} trechos concluídos | ${p1Array.length + p2Array.length} ofertas catalogadas)`,
     completedCount: completedLegsCount,
-    totalCount: session.legs.length,
+    totalCount,
     totalOffersFound: p1Array.length + p2Array.length,
-    legDetails: session.legs
+    legDetails: session.legs || [],
+    allAvailableDates,
+    allAvailableReturnDates
   };
 }
 

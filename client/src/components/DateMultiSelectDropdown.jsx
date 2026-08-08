@@ -75,6 +75,8 @@ export default function DateMultiSelectDropdown({
               ? `Todas as Datas (${availableDates.length})`
               : isAllSelected
               ? `Todas Selecionadas (${availableDates.length})`
+              : selectedCount === 1
+              ? formatToBrazillianDate(selectedDates[0])
               : `${selectedCount} de ${availableDates.length} Datas`}
           </span>
           <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
