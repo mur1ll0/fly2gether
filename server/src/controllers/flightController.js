@@ -76,6 +76,22 @@ export async function handleSearchFlights(req, res) {
         timeFilters
       });
 
+      if (results && results.status === 'failed') {
+        return res.json({
+          status: 'failed',
+          isCompleted: false,
+          isError: true,
+          message: results.errorMessage || results.message || 'Não foram encontrados voos disponíveis operando nas datas selecionadas. Tente novamente mais tarde.',
+          results: [],
+          diagnostics: results.diagnostics || {
+            person1: { origin: orig1, destination, ...diagnoseAirportRoute(orig1, destination) },
+            person2: { origin: origin2, destination, ...diagnoseAirportRoute(origin2, destination) }
+          },
+          allAvailableDates: [],
+          allAvailableReturnDates: []
+        });
+      }
+
       const isScrapingStillRunning = results && (results.status === 'scraping' || results.status === 'pending' || results.isCompleted === false);
 
       if (isScrapingStillRunning) {
@@ -133,6 +149,19 @@ export async function handleSearchFlights(req, res) {
         sortBy,
         timeFilters
       });
+
+      if (results && results.status === 'failed') {
+        return res.json({
+          status: 'failed',
+          isCompleted: false,
+          isError: true,
+          message: results.errorMessage || results.message || 'Não foram encontrados voos disponíveis operando nas datas selecionadas. Tente novamente mais tarde.',
+          results: [],
+          diagnostics: results.diagnostics || diagnoseAirportRoute(origin, destination),
+          allAvailableDates: [],
+          allAvailableReturnDates: []
+        });
+      }
 
       const isScrapingStillRunning = results && (results.status === 'scraping' || results.status === 'pending' || results.isCompleted === false);
 

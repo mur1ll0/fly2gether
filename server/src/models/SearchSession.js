@@ -22,6 +22,7 @@ const SearchSessionSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'scraping', 'completed', 'failed'], default: 'pending' },
   legs: [LegSchema],
   totalOffersCount: { type: Number, default: 0 },
+  errorMessage: { type: String, default: null },
   scrapedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: () => new Date(Date.now() + 2 * 60 * 60 * 1000), index: { expireAfterSeconds: 0 } }

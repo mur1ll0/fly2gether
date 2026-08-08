@@ -1,5 +1,5 @@
 import Alert from '../models/Alert.js';
-import { searchSingleFlights, searchCombinedFlights } from '../services/flightEngine.js';
+import { searchSingleFlights, searchCombinedFlights, isTimeInWindow } from '../services/flightEngine.js';
 import { sendPriceAlertEmail } from '../services/emailService.js';
 
 // Memory fallback para testes locais sem MongoDB
@@ -31,6 +31,9 @@ export async function createAlert(req, res) {
       durationDays = 4,
       sortBy,
       selectedAirlines,
+      selectedDates,
+      selectedReturnDates,
+      timeFilters,
       stopsFilter,
       hideTransfers,
       toleranceIndex,
@@ -65,6 +68,9 @@ export async function createAlert(req, res) {
       durationDays: Number(durationDays) || 4,
       sortBy: sortBy || (mode === 'flytogether' ? 'sincronia_total' : 'price'),
       selectedAirlines: Array.isArray(selectedAirlines) ? selectedAirlines : ['LA', 'G3', 'AD', 'TP', 'CM'],
+      selectedDates: Array.isArray(selectedDates) ? selectedDates : [],
+      selectedReturnDates: Array.isArray(selectedReturnDates) ? selectedReturnDates : [],
+      timeFilters: timeFilters && typeof timeFilters === 'object' ? timeFilters : {},
       stopsFilter: stopsFilter || 'all',
       hideTransfers: Boolean(hideTransfers),
       toleranceIndex: toleranceIndex !== undefined ? Number(toleranceIndex) : 3,
@@ -151,7 +157,10 @@ export async function checkAlertsNow() {
           isVacation: alert.isVacation,
           vacationStart: alert.vacationStart,
           vacationEnd: alert.vacationEnd,
-          durationDays: alert.durationDays
+          durationDays: alert.durationDays,
+          selectedDates: alert.selectedDates,
+          selectedReturnDates: alert.selectedReturnDates,
+          timeFilters: alert.timeFilters
         });
       } else {
         results = await searchSingleFlights({
@@ -163,7 +172,10 @@ export async function checkAlertsNow() {
           isVacation: alert.isVacation,
           vacationStart: alert.vacationStart,
           vacationEnd: alert.vacationEnd,
-          durationDays: alert.durationDays
+          durationDays: alert.durationDays,
+          selectedDates: alert.selectedDates,
+          selectedReturnDates: alert.selectedReturnDates,
+          timeFilters: alert.timeFilters
         });
       }
 
@@ -225,6 +237,38 @@ export async function checkAlertsNow() {
             } else {
               if (item.hasAirportTransfer || item.returnHasAirportTransfer) return false;
             }
+          }
+
+          // Filtro de Datas de Ida e Volta Selecionadas
+          if (alert.selectedDates && alert.selectedDates.length > 0) {
+            const depDate = item.departureDate || item.person1?.departureDate;
+            if (depDate && !alert.selectedDates.includes(depDate)) return false;
+          }
+          if (alert.selectedReturnDates && alert.selectedReturnDates.length > 0) {
+            const retDate = item.returnDate || item.person1?.returnDate;
+            if (retDate && !alert.selectedReturnDates.includes(retDate)) return false;
+          }
+
+          // Filtro de Janela de Horários
+          const tf = alert.timeFilters || {};
+          if (alert.mode === 'flytogether') {
+            if (item.person1) {
+              if (!isTimeInWindow(item.person1.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return false;
+              if (!isTimeInWindow(item.person1.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return false;
+              if (!isTimeInWindow(item.person1.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return false;
+              if (!isTimeInWindow(item.person1.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return false;
+            }
+            if (item.person2) {
+              if (!isTimeInWindow(item.person2.departureTime, tf.p2DepTimeMin, tf.p2DepTimeMax)) return false;
+              if (!isTimeInWindow(item.person2.arrivalTime, tf.p2ArrTimeMin, tf.p2ArrTimeMax)) return false;
+              if (!isTimeInWindow(item.person2.returnDepartureTime, tf.p2RetDepTimeMin, tf.p2RetDepTimeMax)) return false;
+              if (!isTimeInWindow(item.person2.returnArrivalTime, tf.p2RetArrTimeMin, tf.p2RetArrTimeMax)) return false;
+            }
+          } else {
+            if (!isTimeInWindow(item.departureTime, tf.p1DepTimeMin, tf.p1DepTimeMax)) return false;
+            if (!isTimeInWindow(item.arrivalTime, tf.p1ArrTimeMin, tf.p1ArrTimeMax)) return false;
+            if (!isTimeInWindow(item.returnDepartureTime, tf.p1RetDepTimeMin, tf.p1RetDepTimeMax)) return false;
+            if (!isTimeInWindow(item.returnArrivalTime, tf.p1RetArrTimeMin, tf.p1RetArrTimeMax)) return false;
           }
 
           // Filtro de Tolerância de Horários no modo Fly Together

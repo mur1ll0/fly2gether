@@ -10,7 +10,7 @@ const FlightCacheSchema = new mongoose.Schema({
   flights: { type: Array, required: true },
   scrapedAt: { type: Date, default: Date.now },
   source: { type: String, enum: ['api', 'scraper'], default: 'scraper' },
-  status: { type: String, enum: ['pending', 'completed'], default: 'completed' }
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'completed' }
 });
 
 // Index to optimize lookups por rota

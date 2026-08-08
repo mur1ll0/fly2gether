@@ -71,6 +71,9 @@ export default function CreateAlertModal({ isOpen, onClose, alertTarget, onAlert
         durationDays: searchState.durationDays || 4,
         sortBy: searchState.sortBy || (isFlyTogether ? 'sincronia_total' : 'price'),
         selectedAirlines: searchState.selectedAirlines || ['LA', 'G3', 'AD', 'TP', 'CM'],
+        selectedDates: searchState.selectedDates || [],
+        selectedReturnDates: searchState.selectedReturnDates || [],
+        timeFilters: searchState.timeFilters || {},
         stopsFilter: searchState.stopsFilter || 'all',
         hideTransfers: Boolean(searchState.hideTransfers),
         toleranceIndex: searchState.toleranceIndex !== undefined ? searchState.toleranceIndex : 3,
@@ -158,6 +161,15 @@ export default function CreateAlertModal({ isOpen, onClose, alertTarget, onAlert
               )}
               {searchState.selectedAirlines && (
                 <li>Companhias: <strong>{searchState.selectedAirlines.join(', ')}</strong></li>
+              )}
+              {searchState.selectedDates?.length > 0 && (
+                <li>Datas de Ida Selecionadas: <strong>{searchState.selectedDates.length} datas</strong></li>
+              )}
+              {searchState.selectedReturnDates?.length > 0 && (
+                <li>Datas de Volta Selecionadas: <strong>{searchState.selectedReturnDates.length} datas</strong></li>
+              )}
+              {Object.keys(searchState.timeFilters || {}).length > 0 && (
+                <li>Filtros de Janela de Horário: <strong>Ativos ({Object.keys(searchState.timeFilters).length})</strong></li>
               )}
             </ul>
           </div>

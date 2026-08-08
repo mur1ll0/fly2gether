@@ -162,6 +162,20 @@ export default function App() {
         if (res.data?.allAvailableDates) setServerAvailableDates(res.data.allAvailableDates);
         if (res.data?.allAvailableReturnDates) setServerAvailableReturnDates(res.data.allAvailableReturnDates);
 
+        if (res.data?.status === 'failed' || res.data?.isError) {
+          console.log('❌ [Polling] Busca finalizada com erro ou 0 voos.');
+          setResults([]);
+          setSearchDiagnostics(res.data?.diagnostics || null);
+          setScrapingMessage('');
+          setScrapingProgress({ completed: 0, total: 0 });
+          setLoading(false);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          return;
+        }
+
         const isScrapingStillRunning = res.data?.status === 'scraping' || res.data?.status === 'pending' || res.data?.isCompleted === false;
 
         if (!isScrapingStillRunning) {
@@ -393,7 +407,10 @@ export default function App() {
       selectedAirlines,
       stopsFilter,
       hideTransfers,
-      toleranceIndex
+      toleranceIndex,
+      selectedDates,
+      selectedReturnDates,
+      timeFilters
     };
 
     setActiveAlertTarget({ flightOrCombined, searchState });

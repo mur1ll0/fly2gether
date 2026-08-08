@@ -19,6 +19,9 @@ const AlertSchema = new mongoose.Schema({
   vacationEnd: { type: String }, // YYYY-MM-DD
   sortBy: { type: String, default: 'sincronia_total' }, // 'sincronia_total', 'tempo_juntos', 'price', 'duration', 'departureTime', 'sincronia'
   selectedAirlines: { type: [String], default: ['LA', 'G3', 'AD', 'TP', 'CM'] },
+  selectedDates: { type: [String], default: [] },
+  selectedReturnDates: { type: [String], default: [] },
+  timeFilters: { type: Object, default: {} },
   stopsFilter: { type: String, default: 'all' }, // 'all', 'direct', 'stops'
   hideTransfers: { type: Boolean, default: false },
   toleranceIndex: { type: Number, default: 3 },

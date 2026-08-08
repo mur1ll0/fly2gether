@@ -548,7 +548,7 @@ function processLocalScrapeQueue() {
   });
 }
 
-function isTimeInWindow(timeStr, minTime, maxTime) {
+export function isTimeInWindow(timeStr, minTime, maxTime) {
   if (!timeStr) return true;
   if (!minTime && !maxTime) return true;
   try {
@@ -803,14 +803,16 @@ export async function searchSingleFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
-  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos)
+  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos) ou se falhou / ficou sem ofertas
   const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
     (Date.now() - new Date(session.scrapedAt || session.createdAt || 0).getTime() > 120000);
+  const isFailedOrEmpty = session && (session.status === 'failed' || (session.status === 'completed' && session.totalOffersCount === 0));
 
-  if (!session || isStalled || (session.legs && session.legs.some(l => !l.departureDate))) {
+  if (!session || isStalled || isFailedOrEmpty || (session.legs && session.legs.some(l => !l.departureDate))) {
     if (session) {
-      console.log(`[SearchSession Reset] Sessão normal ${searchHash} resetada (stalled=${isStalled}). Redisparando robô no GitHub Actions...`);
+      console.log(`[SearchSession Reset] Sessão normal ${searchHash} resetada (stalled=${isStalled}, failedOrEmpty=${isFailedOrEmpty}). Redisparando robô no GitHub Actions...`);
       await SearchSession.deleteOne({ _id: searchHash });
+      await FlightCache.deleteMany({ searchHash });
     }
 
     const legs = candidateDates.map(pair => ({
@@ -996,14 +998,16 @@ export async function searchCombinedFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
-  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos)
+  // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 2 minutos) ou se falhou / ficou sem ofertas
   const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
     (Date.now() - new Date(session.scrapedAt || session.createdAt || 0).getTime() > 120000);
+  const isFailedOrEmpty = session && (session.status === 'failed' || (session.status === 'completed' && session.totalOffersCount === 0));
 
-  if (!session || isStalled || (session.legs && session.legs.some(l => !l.departureDate))) {
+  if (!session || isStalled || isFailedOrEmpty || (session.legs && session.legs.some(l => !l.departureDate))) {
     if (session) {
-      console.log(`[SearchSession Reset] Sessão Fly Together ${searchHash} resetada (stalled=${isStalled}). Redisparando robô no GitHub Actions...`);
+      console.log(`[SearchSession Reset] Sessão Fly Together ${searchHash} resetada (stalled=${isStalled}, failedOrEmpty=${isFailedOrEmpty}). Redisparando robô no GitHub Actions...`);
       await SearchSession.deleteOne({ _id: searchHash });
+      await FlightCache.deleteMany({ searchHash });
     }
 
     const legs = [];

@@ -6,6 +6,7 @@ import Alert from './models/Alert.js';
 import FlightCache from './models/FlightCache.js';
 import SearchSession from './models/SearchSession.js';
 import { scrapeGoogleFlights } from './services/providers/googleFlightsScraper.js';
+import { checkAlertsNow } from './controllers/alertController.js';
 
 // Carregar variáveis de ambiente
 dotenv.config();
@@ -128,6 +129,7 @@ async function runScraperJob() {
   }
 
   const tasksMap = new Map();
+  let pendingSessions = [];
 
   // Caso 1: Foi fornecido argumentos de CLI para busca específica (ex: repository_dispatch)
   const argOrigin = process.argv[2];
@@ -194,7 +196,7 @@ async function runScraperJob() {
     }
 
     // Caso Extra: LER SESSÕES DE BUSCA PENDENTES DO SISTEMA (Criadas pelos usuários no Vercel)
-    const pendingSessions = await SearchSession.find({
+    pendingSessions = await SearchSession.find({
       status: { $in: ['pending', 'scraping'] }
     }).lean();
 
@@ -256,39 +258,53 @@ async function runScraperJob() {
   let skippedCount = 0;
   let failureCount = 0;
 
-async function updateSearchSessionLeg(searchHash, task, offersCount) {
+async function updateSearchSessionLeg(searchHash, task, offersCount, isSuccess = true) {
   if (!searchHash) return;
   try {
     const sessionDoc = await SearchSession.findById(searchHash);
     if (sessionDoc) {
-      const legIdx = sessionDoc.legs.findIndex(l => 
-        l.origin === task.origin && 
-        l.destination === task.destination && 
+      const legIdx = sessionDoc.legs.findIndex(l =>
+        l.origin === task.origin &&
+        l.destination === task.destination &&
         l.departureDate === task.departureDate &&
         (l.person === task.person || !task.person)
       );
+      const legStatus = (isSuccess && offersCount > 0) ? 'completed' : 'failed';
+      
       if (legIdx !== -1) {
-        sessionDoc.legs[legIdx].status = 'completed';
+        sessionDoc.legs[legIdx].status = legStatus;
         sessionDoc.legs[legIdx].offersCount = offersCount;
       } else {
         const matchIdx = sessionDoc.legs.findIndex(l =>
           l.origin === task.origin &&
           l.destination === task.destination &&
-          l.departureDate === task.departureDate &&
-          l.status !== 'completed'
+          l.departureDate === task.departureDate
         );
         if (matchIdx !== -1) {
-          sessionDoc.legs[matchIdx].status = 'completed';
+          sessionDoc.legs[matchIdx].status = legStatus;
           sessionDoc.legs[matchIdx].offersCount = offersCount;
         }
       }
-      const allLegsCompleted = sessionDoc.legs.every(l => l.status === 'completed');
-      sessionDoc.status = allLegsCompleted ? 'completed' : 'scraping';
-      sessionDoc.totalOffersCount = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
+
+      const allLegsDone = sessionDoc.legs.every(l => l.status === 'completed' || l.status === 'failed');
+      const totalOffers = sessionDoc.legs.reduce((acc, l) => acc + (l.offersCount || 0), 0);
+
+      if (allLegsDone) {
+        if (totalOffers > 0) {
+          sessionDoc.status = 'completed';
+        } else {
+          sessionDoc.status = 'failed';
+          sessionDoc.errorMessage = 'Não foram encontrados voos para os critérios ou ocorreu uma falha ao coletar dados do Google Flights. Tente novamente.';
+        }
+      } else {
+        sessionDoc.status = 'scraping';
+      }
+
+      sessionDoc.totalOffersCount = totalOffers;
       sessionDoc.scrapedAt = new Date();
       sessionDoc.updatedAt = new Date();
       await sessionDoc.save();
-      log(`-> SearchSession [${searchHash}] perna [${task.origin}➔${task.destination}] atualizada: status=${sessionDoc.status}, ofertas=${offersCount}`);
+      log(`-> SearchSession [${searchHash}] perna [${task.origin}➔${task.destination}] atualizada: legStatus=${legStatus}, sessionStatus=${sessionDoc.status}, ofertas=${offersCount}`);
     }
   } catch (err) {
     log(`-> Erro ao atualizar SearchSession [${searchHash}]: ${err.message}`);
@@ -351,17 +367,60 @@ async function updateSearchSessionLeg(searchHash, task, offersCount) {
         { upsert: true, new: true }
       );
 
-      // 4. Se a tarefa pertencer a uma SearchSession, atualiza o status da perna e da sessão
-      await updateSearchSessionLeg(task.searchHash, task, flightsList ? flightsList.length : 0);
+      if (flightsList && flightsList.length > 0) {
+        await FlightCache.findOneAndUpdate(
+          {
+            searchHash: task.searchHash || null,
+            origin: task.origin,
+            destination: task.destination,
+            departureDate: task.departureDate,
+            returnDate: task.returnDate || null
+          },
+          {
+            searchHash: task.searchHash || null,
+            origin: task.origin,
+            destination: task.destination,
+            departureDate: task.departureDate,
+            returnDate: task.returnDate || null,
+            person: task.person || 'p1',
+            flights: flightsList,
+            scrapedAt: new Date(),
+            source: 'scraper',
+            status: 'completed'
+          },
+          { upsert: true, new: true }
+        );
 
-      log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Gravado/Atualizado no MongoDB com ${flightsList ? flightsList.length : 0} ofertas.`);
-      successCount++;
+        await updateSearchSessionLeg(task.searchHash, task, flightsList.length, true);
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] -> Gravado/Atualizado no MongoDB com ${flightsList.length} ofertas.`);
+        successCount++;
+      } else {
+        log(`[Progresso ${taskIdx+1}/${tasks.length}] ⚠️ Raspagem retornou 0 voos para ${task.origin}➔${task.destination}. Gravando no MongoDB com status 'failed'.`);
+        await FlightCache.findOneAndUpdate(
+          {
+            origin: task.origin,
+            destination: task.destination,
+            departureDate: task.departureDate,
+            returnDate: null
+          },
+          {
+            flights: [],
+            scrapedAt: new Date(),
+            source: 'scraper',
+            status: 'failed'
+          },
+          { upsert: true }
+        );
+
+        await updateSearchSessionLeg(task.searchHash, task, 0, false);
+        failureCount++;
+      }
 
       // Atraso preventivo de 3 segundos entre execuções do mesmo worker para evitar CAPTCHAs
       await new Promise(resolve => setTimeout(resolve, 3000));
 
     } catch (taskErr) {
-      log(`[Progresso ${taskIdx+1}/${tasks.length}] -> ❌ Falha: ${taskErr.message}. Gravando no MongoDB com 0 ofertas.`);
+      log(`[Progresso ${taskIdx+1}/${tasks.length}] -> ❌ Falha: ${taskErr.message}. Gravando no MongoDB com status 'failed'.`);
       try {
         await FlightCache.findOneAndUpdate(
           {
@@ -374,11 +433,11 @@ async function updateSearchSessionLeg(searchHash, task, offersCount) {
             flights: [],
             scrapedAt: new Date(),
             source: 'scraper',
-            status: 'completed'
+            status: 'failed'
           },
           { upsert: true }
         );
-        await updateSearchSessionLeg(task.searchHash, task, 0);
+        await updateSearchSessionLeg(task.searchHash, task, 0, false);
       } catch (dbErr) {
         log(`-> Erro ao salvar falha no MongoDB: ${dbErr.message}`);
       }
@@ -413,6 +472,15 @@ async function updateSearchSessionLeg(searchHash, task, offersCount) {
     } catch (e) {
       log(`-> Erro na sincronização final da SearchSession: ${e.message}`);
     }
+  }
+
+  // Executar checagem de alertas para disparar e-mails com os preços novos salvos
+  log('🔔 Verificando alertas de preço e enviando notificações por e-mail...');
+  try {
+    await checkAlertsNow();
+    log('✅ Verificação de alertas concluída com sucesso.');
+  } catch (alertErr) {
+    log(`⚠️ Erro ao verificar alertas de preço: ${alertErr.message}`);
   }
 
   log(`Job concluído. Sucessos: ${successCount}, Pulados: ${skippedCount}, Falhas: ${failureCount}`);

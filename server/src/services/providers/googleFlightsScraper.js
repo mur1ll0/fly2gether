@@ -117,20 +117,59 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate, 
     log(`Navegando para a URL: ${url}`);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    log(`Aguardando os cards de voo carregarem (li.pIav2d)...`);
+    // Auto-aceitar modal de consentimento do Google se for exibido
     try {
-      await page.waitForSelector('li.pIav2d', { timeout: 15000 });
-      log(`Cards carregados.`);
+      const consentBtn = await page.$('button[aria-label*="Aceitar"], button[aria-label*="Accept"], form[action*="consent"] button, button[aria-label*="Concordo"]');
+      if (consentBtn) {
+        log(`Auto-aceitando modal de consentimento/cookies do Google...`);
+        await consentBtn.click();
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => {});
+      }
+    } catch (cErr) {}
+
+    const CARD_SELECTORS = 'li.pIav2d, div.nfl22, ul.RkI7ed > li, li[class*="pIav2d"], div.gws-flights-results__itinerary-card, [role="listitem"]';
+
+    log(`Aguardando os cards de voo carregarem...`);
+    try {
+      await page.waitForSelector(CARD_SELECTORS, { timeout: 15000 });
+      log(`Cards de voo identificados no DOM.`);
     } catch (e) {
-      log(`⚠️ Timeout esperando pelos cards. Aguardando 5 segundos adicionais de segurança...`);
+      log(`⚠️ Timeout esperando pelos cards principais. Aguardando 5 segundos adicionais de segurança...`);
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
 
-    log(`Procurando cards de voo (li.pIav2d)...`);
+    log(`Procurando cards de voo com seletores múltiplos...`);
     
     // 1. Extrai dados básicos das linhas ANTES de qualquer expansão
     const initialRowsData = await page.evaluate(() => {
-      const flightRows = Array.from(document.querySelectorAll('li.pIav2d'));
+      const selectors = [
+        'li.pIav2d',
+        'div.nfl22',
+        'ul.RkI7ed > li',
+        'li[class*="pIav2d"]',
+        'div[class*="RkI7ed"] li',
+        'div.gws-flights-results__itinerary-card',
+        '[role="listitem"]'
+      ];
+
+      let flightRows = [];
+      for (const sel of selectors) {
+        const found = Array.from(document.querySelectorAll(sel));
+        if (found.length > 0) {
+          flightRows = found;
+          break;
+        }
+      }
+
+      // Fallback genérico se seletores específicos falharem
+      if (flightRows.length === 0) {
+        const candidates = Array.from(document.querySelectorAll('li, div[class*="card"], div[class*="row"]'));
+        flightRows = candidates.filter(el => {
+          const t = el.innerText || '';
+          return t.includes('R$') && /\d{2}:\d{2}/.test(t);
+        });
+      }
+
       return flightRows.map((row, index) => {
         const text = row.innerText || '';
         const priceMatch = text.match(/R\$\s*([\d\.]+)/);
@@ -145,8 +184,7 @@ export async function scrapeGoogleFlights({ origin, destination, departureDate, 
       });
     });
 
-    // Filtra apenas linhas que parecem ser voos válidos (têm preço e horários)
-    log(`Total de elementos li.pIav2d encontrados: ${initialRowsData.length}`);
+    log(`Total de elementos de voo encontrados: ${initialRowsData.length}`);
     initialRowsData.forEach((row) => {
       log(`Row [${row.index}]: textLength=${row.textLength}, hasPrice=${row.hasPrice}, hasTimes=${row.hasTimes}`);
     });
