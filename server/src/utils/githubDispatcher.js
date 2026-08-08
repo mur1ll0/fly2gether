@@ -14,9 +14,9 @@ export async function triggerGithubScraper(origin = null, destination = null, de
   const now = Date.now();
   const lastTime = activeDispatches.get(dispatchKey) || 0;
 
-  // Evita disparar rajadas duplicadas do mesmo lote em menos de 15 segundos
-  if (now - lastTime < 15000) {
-    console.log(`[CONFIG] ℹ️ Disparo recente (< 15s) para o lote [${dispatchKey}]. Reutilizando robô em andamento.`);
+  // Evita disparar rajadas duplicadas do mesmo lote em menos de 2 minutos (120s)
+  if (now - lastTime < 120000) {
+    console.log(`[CONFIG] ℹ️ Disparo recente (< 2m) para o lote [${dispatchKey}]. Reutilizando robô em andamento.`);
     return true;
   }
 
