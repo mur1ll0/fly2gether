@@ -573,7 +573,7 @@ export function isTimeInWindow(timeStr, minTime, maxTime) {
 async function resolveOneWayLeg(origin, destination, date, useLiveApi = false, forceRefresh = false) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000); // Alinhado com TTL de 2h do FlightCache
 
   if (forceRefresh) {
     console.log(`[Force Refresh] Ignorando e limpando cache existente para ${originUpper}➔${destUpper} em ${date}`);
@@ -675,7 +675,7 @@ async function resolveOneWayLeg(origin, destination, date, useLiveApi = false, f
 async function resolveFlightsForPair({ origin, destination, departureDate, returnDate, useLiveApi, forceRefresh = false }) {
   const originUpper = origin.toUpperCase();
   const destUpper = destination.toUpperCase();
-  const freshThreshold = new Date(Date.now() - 8 * 60 * 60 * 1000);
+  const freshThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000); // Alinhado com TTL de 2h do FlightCache
 
   // Caso 1: Modo API Paga (Tratamento unificado com cache)
   if (returnDate && useLiveApi) {
@@ -803,6 +803,16 @@ export async function searchSingleFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
+  // Verificar se a sessão expirou (mais de 2h desde a criação)
+  const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
+  const isSessionExpired = session && (Date.now() - new Date(session.createdAt).getTime() > SESSION_TTL_MS);
+  if (isSessionExpired) {
+    console.log(`[SearchSession Expired] Sessão normal ${searchHash} expirou (>2h desde criação). Recriando...`);
+    await SearchSession.deleteOne({ _id: searchHash });
+    await FlightCache.deleteMany({ searchHash });
+    session = null;
+  }
+
   // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 3 minutos)
   const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
     (Date.now() - new Date(session.updatedAt || session.scrapedAt || session.createdAt || 0).getTime() > 180000);
@@ -850,10 +860,12 @@ export async function searchSingleFlights(params) {
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash ou rota equivalente
   const targetDates = candidateDates.map(c => c.departureDate);
+  const cacheFreshThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000);
   const cachedDocs = await FlightCache.find({
     $or: [
       { searchHash },
-      { origin: originUpper, destination: destUpper, departureDate: { $in: targetDates } }
+      { origin: originUpper, destination: destUpper, departureDate: { $in: targetDates },
+        scrapedAt: { $gte: cacheFreshThreshold } } // Apenas docs frescos (< 2h) para evitar contaminação cruzada
     ]
   }).lean();
 
@@ -904,7 +916,7 @@ export async function searchSingleFlights(params) {
     const allLegsCompleted = session.legs.every(l => l.status === 'completed');
     if (allLegsCompleted && session.status !== 'completed') {
       session.status = 'completed';
-      session.scrapedAt = new Date();
+      // NÃO atualizar scrapedAt — deve manter a data original do scraper/API
       updatedLegs = true;
     }
 
@@ -1000,6 +1012,16 @@ export async function searchCombinedFlights(params) {
   // 1. Tentar encontrar SearchSession ativa (< 2h)
   let session = forceRefresh ? null : await SearchSession.findById(searchHash);
 
+  // Verificar se a sessão expirou (mais de 2h desde a criação)
+  const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
+  const isSessionExpired = session && (Date.now() - new Date(session.createdAt).getTime() > SESSION_TTL_MS);
+  if (isSessionExpired) {
+    console.log(`[SearchSession Expired] Sessão Fly Together ${searchHash} expirou (>2h desde criação). Recriando...`);
+    await SearchSession.deleteOne({ _id: searchHash });
+    await FlightCache.deleteMany({ searchHash });
+    session = null;
+  }
+
   // Checa se a sessão está travada (em pending/scraping sem atualizações há mais de 3 minutos)
   const isStalled = session && (session.status === 'pending' || session.status === 'scraping') &&
     (Date.now() - new Date(session.updatedAt || session.scrapedAt || session.createdAt || 0).getTime() > 180000);
@@ -1060,10 +1082,12 @@ export async function searchCombinedFlights(params) {
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash
   const targetDates = candidateDates.map(c => c.departureDate);
+  const cacheFreshThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000);
   const cachedDocs = await FlightCache.find({
     $or: [
       { searchHash },
-      { origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate: { $in: targetDates } }
+      { origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate: { $in: targetDates },
+        scrapedAt: { $gte: cacheFreshThreshold } } // Apenas docs frescos (< 2h) para evitar contaminação cruzada
     ]
   }).lean();
 
@@ -1108,7 +1132,7 @@ export async function searchCombinedFlights(params) {
     const allLegsCompleted = session.legs.every(l => l.status === 'completed');
     if (allLegsCompleted && session.status !== 'completed') {
       session.status = 'completed';
-      session.scrapedAt = new Date();
+      // NÃO atualizar scrapedAt — deve manter a data original do scraper/API
       updatedLegs = true;
     }
 
