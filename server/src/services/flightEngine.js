@@ -768,7 +768,8 @@ export async function searchSingleFlights(params) {
     selectedReturnDates,
     sortBy = 'price',
     timeFilters = {},
-    forceRefresh = false
+    forceRefresh = false,
+    useLiveApi = false
   } = params;
 
   const originUpper = (origin || '').toUpperCase().trim();
@@ -798,6 +799,9 @@ export async function searchSingleFlights(params) {
     console.log(`[Force Refresh] Limpando sessão e voos para hash ${searchHash}`);
     await SearchSession.deleteOne({ _id: searchHash });
     await FlightCache.deleteMany({ searchHash });
+    // Também limpar FlightCache por rota para evitar que o $or encontre docs órfãos
+    const targetDatesForClean = candidateDates.map(c => c.departureDate);
+    await FlightCache.deleteMany({ origin: originUpper, destination: destUpper, departureDate: { $in: targetDatesForClean } });
   }
 
   // 1. Tentar encontrar SearchSession ativa (< 2h)
@@ -856,6 +860,31 @@ export async function searchSingleFlights(params) {
     );
 
     triggerGithubScraper(originUpper, destUpper, departureDate, returnDate, searchHash).catch(() => {});
+
+    // Se useLiveApi=true, buscar imediatamente via SerpAPI em vez de esperar o scraper
+    if (useLiveApi) {
+      console.log(`[Live API] useLiveApi=true, chamando SerpAPI diretamente para ${originUpper}➔${destUpper}...`);
+      try {
+        const liveResults = await resolveFlightsForPair({ origin: originUpper, destination: destUpper, departureDate, returnDate, useLiveApi: true, forceRefresh });
+        if (Array.isArray(liveResults) && liveResults.length > 0) {
+          // Salvar no FlightCache vinculado à sessão
+          await FlightCache.findOneAndUpdate(
+            { searchHash, origin: originUpper, destination: destUpper, departureDate, returnDate: returnDate || null },
+            { searchHash, flights: liveResults, scrapedAt: new Date(), source: 'api', status: 'completed', person: 'p1' },
+            { upsert: true }
+          );
+          // Atualizar sessão como completed
+          session.status = 'completed';
+          session.totalOffersCount = liveResults.length;
+          if (session.legs) {
+            session.legs.forEach(l => { l.status = 'completed'; l.offersCount = liveResults.length; });
+          }
+          await session.save();
+        }
+      } catch (err) {
+        console.error(`[Live API] Falha na chamada SerpAPI:`, err.message);
+      }
+    }
   }
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash ou rota equivalente
@@ -973,7 +1002,8 @@ export async function searchCombinedFlights(params) {
     selectedReturnDates,
     sortBy = 'sincronia_total',
     timeFilters = {},
-    forceRefresh = false
+    forceRefresh = false,
+    useLiveApi = false
   } = params;
 
   const orig1Upper = (origin1 || '').toUpperCase().trim();
@@ -1007,6 +1037,9 @@ export async function searchCombinedFlights(params) {
     console.log(`[Force Refresh] Limpando sessão Fly Together e voos para hash ${searchHash}`);
     await SearchSession.deleteOne({ _id: searchHash });
     await FlightCache.deleteMany({ searchHash });
+    // Também limpar FlightCache por rota para evitar que o $or encontre docs órfãos
+    const targetDatesForClean = candidateDates.map(c => c.departureDate);
+    await FlightCache.deleteMany({ origin: { $in: [orig1Upper, orig2Upper] }, destination: destUpper, departureDate: { $in: targetDatesForClean } });
   }
 
   // 1. Tentar encontrar SearchSession ativa (< 2h)
@@ -1078,6 +1111,42 @@ export async function searchCombinedFlights(params) {
     );
 
     triggerGithubScraper(orig1Upper, destUpper, departureDate, returnDate, searchHash).catch(() => {});
+
+    // Se useLiveApi=true, buscar imediatamente via SerpAPI para ambos os trechos
+    if (useLiveApi) {
+      console.log(`[Live API Fly Together] useLiveApi=true, chamando SerpAPI para P1(${orig1Upper}) e P2(${orig2Upper})➔${destUpper}...`);
+      try {
+        const [p1Results, p2Results] = await Promise.all([
+          resolveFlightsForPair({ origin: orig1Upper, destination: destUpper, departureDate, returnDate, useLiveApi: true, forceRefresh }),
+          resolveFlightsForPair({ origin: orig2Upper, destination: destUpper, departureDate, returnDate, useLiveApi: true, forceRefresh })
+        ]);
+
+        if (Array.isArray(p1Results) && p1Results.length > 0) {
+          await FlightCache.findOneAndUpdate(
+            { searchHash, origin: orig1Upper, destination: destUpper, departureDate, person: 'p1' },
+            { searchHash, flights: p1Results, scrapedAt: new Date(), source: 'api', status: 'completed', person: 'p1' },
+            { upsert: true }
+          );
+        }
+        if (Array.isArray(p2Results) && p2Results.length > 0) {
+          await FlightCache.findOneAndUpdate(
+            { searchHash, origin: orig2Upper, destination: destUpper, departureDate, person: 'p2' },
+            { searchHash, flights: p2Results, scrapedAt: new Date(), source: 'api', status: 'completed', person: 'p2' },
+            { upsert: true }
+          );
+        }
+
+        // Atualizar sessão como completed
+        session.status = 'completed';
+        session.totalOffersCount = (p1Results?.length || 0) + (p2Results?.length || 0);
+        if (session.legs) {
+          session.legs.forEach(l => { l.status = 'completed'; });
+        }
+        await session.save();
+      } catch (err) {
+        console.error(`[Live API Fly Together] Falha na chamada SerpAPI:`, err.message);
+      }
+    }
   }
 
   // 2. Buscar ofertas em FlightCache vinculadas pelo searchHash
